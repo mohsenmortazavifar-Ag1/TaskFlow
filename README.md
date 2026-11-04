@@ -7,8 +7,9 @@
 - React و lucide-react
 - SQL Server از طریق پکیج mssql
 - رابط فارسی و RTL
+- .NET 10 Worker Service مستقل برای اجرای Jobها
 
-## راه‌اندازی
+## راه‌اندازی وب
 1. Node.js 20.9+ و SQL Server در دسترس داشته باشید.
 2. فایل .env.example را به .env.local کپی و تنظیمات اتصال را وارد کنید.
 3. اسکریپت‌ها را به ترتیب اجرا کنید:
@@ -19,15 +20,18 @@
 4. سپس npm install و npm run dev را اجرا کنید.
 5. داشبورد در http://localhost:3000 در دسترس است.
 
+## راه‌اندازی Worker
+راهنمای اجرای Worker در [worker/README.md](worker/README.md) و راهنمای نصب سرویس Windows/Linux در [worker/deploy/README.md](worker/deploy/README.md) قرار دارد. Worker یک Process جدا از Next.js است و به .NET 10 Runtime (در حالت framework-dependent) و دسترسی SQL Server نیاز دارد.
+
 ## API
 - GET /api/health اتصال SQL Server را بررسی می‌کند.
 - GET /api/jobs?page=1&pageSize=20 فهرست Jobها را می‌دهد و مانند POST به Header با نام x-taskflow-api-key نیاز دارد.
 - POST /api/jobs برای ثبت Job به Header با نام x-taskflow-api-key نیاز دارد.
 
 نمونه Body:
-{"tenantId":125,"queueName":"sms","jobType":"SendSms","payload":{"smsMessageId":98765},"priority":10,"idempotencyKey":"tenant-125-event-unique-id"}
+`{"tenantId":125,"queueName":"sms","jobType":"SendSms","payload":{"smsMessageId":98765},"priority":10,"idempotencyKey":"tenant-125-event-unique-id"}`
 
 ## امنیت و وضعیت پیاده‌سازی
-این نسخه پایه اجرایی است، نه سامانه آماده Production. API خواندن Jobها فعلاً احراز هویت ندارد و باید قبل از انتشار عمومی با Authentication و مجوز نقش‌محور محافظت شود. کلید API فقط در سرویس‌های مورد اعتماد نگهداری شود. TenantId در نسخه نهایی از توکن معتبر سمت سرور استخراج شود.
+این نسخه پایه اجرایی است، نه سامانه آماده Production. کلید API فقط در سرویس‌های مورد اعتماد نگهداری شود. TenantId در نسخه نهایی از توکن معتبر سمت سرور استخراج شود.
 
-Worker Host، Outbox Dispatcher، Reminder Scheduler، احراز هویت مدیران و مدیریت کامل پیامک/صف‌ها هنوز پیاده‌سازی نشده‌اند. جزئیات در docs/architecture.md آمده است.
+Outbox Dispatcher، Reminder Scheduler، آداپتور اختصاصی Provider پیامک، احراز هویت مدیران و مدیریت کامل پیامک/صف‌ها هنوز باقی هستند. Worker فعلی چرخه Claim/Handler/Retry/Complete و Heartbeat را فراهم می‌کند؛ محدودیت‌ها در worker/README.md آمده‌اند.
