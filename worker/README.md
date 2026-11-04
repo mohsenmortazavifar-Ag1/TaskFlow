@@ -107,3 +107,39 @@ A business operation that needs to publish an event must insert the outbox row i
 - Master DB permissions should be read-only; tenant DB permissions should be limited to Outbox SELECT/UPDATE; central DB permissions should be limited to the required Jobs/SmsMessages operations.
 
 This provides at-least-once event transfer with idempotent central job creation; it does not guarantee exactly-once SMS delivery by the external provider. Provider-side idempotency and reconciliation are still required. Build and live integration tests must pass before enabling this service in production.
+
+
+## Reminder Scheduler and Handler
+
+The Reminder Scheduler is enabled by default and runs inside the same Worker process. It reads due rows from the central `dbo.ReminderSchedules` table, creates a `dbo.ReminderOccurrences` row and an `ExecuteReminder` job in a single SQL transaction, then advances the schedule. Due rows are claimed with SQL update locks so two scheduler instances do not materialize the same due time concurrently. The unique key on `ReminderOccurrences(ReminderScheduleId, ScheduleVersion, DueAtUtc)` is the database-level duplicate guard.
+
+The `ExecuteReminder` handler re-reads the occurrence and current schedule before acting. Disabled schedules and occurrences from an old ScheduleVersion are marked skipped. Valid occurrences create a central `SmsMessages` row and a `SendSms` job atomically; the SMS handler/provider remains responsible for actual delivery. An occurrence is marked as queued for SMS, not as provider-delivered.
+
+### Reminder RuleJson contract
+
+Required JSON fields are `mobile` and `message`. Optional fields:
+
+- `providerCode`: provider selection override.
+- `intervalValue` and `intervalUnit`: recurrence; units are `day`, `month`, or `year`. Omit both for a one-shot reminder.
+- `localTime`: optional local wall-clock time in `HH:mm` format for the next recurrence.
+
+Example recurring six-month filter reminder:
+
+```json
+{
+  "mobile": "09120000000",
+  "message": "زمان تعویض فیلتر دستگاه شما فرا رسیده است.",
+  "providerCode": "default",
+  "intervalValue": 6,
+  "intervalUnit": "month",
+  "localTime": "10:00"
+}
+```
+
+Set `ReminderSchedules.NextRunAtUtc` to the first due instant in UTC and `TimeZoneId` to a valid system time-zone ID. The scheduler calculates future dates in the tenant's local time zone, then stores UTC. Daylight-saving gaps are advanced to the first valid local minute; ambiguous local times are resolved deterministically.
+
+Environment variables include `Reminder__Enabled`, `Reminder__PollingIntervalSeconds`, and `Reminder__BatchSize`. Keep `Reminder__MaxConcurrency` at 1 for now; the scheduler serializes each materialization batch transaction.
+
+When a reminder's business rule or target changes, update `RuleJson`/other schedule fields and increment `ScheduleVersion`. Disable a schedule by setting `IsEnabled=0`. This invalidates already queued jobs from older versions when their handler executes. A recurrence with no `intervalValue` is one-shot and is disabled after its occurrence is materialized.
+
+This first implementation assumes reminder definitions and customer contact/message snapshots are stored in central `dbo.ReminderSchedules.RuleJson`. It does not yet query tenant operational databases for reminder definitions, nor does it implement business-specific event triggers (for example, "three days after repair completion"). Those definitions must be created/updated by the tenant-facing business workflow and projected into the central schedule table before this scheduler can process them. Validate time-zone IDs and RuleJson at write time; malformed due rules currently fail the batch and require operator correction.
