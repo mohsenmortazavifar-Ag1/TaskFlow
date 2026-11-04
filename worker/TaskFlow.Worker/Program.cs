@@ -6,6 +6,8 @@ using TaskFlow.Worker.Handlers;
 using TaskFlow.Worker.Services;
 
 var builder = Host.CreateApplicationBuilder(args);
+var shutdownTimeoutSeconds = Math.Clamp(builder.Configuration.GetValue<int?>("Worker:ShutdownTimeoutSeconds") ?? 30, 5, 300);
+builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(shutdownTimeoutSeconds));
 
 if (OperatingSystem.IsWindows())
     builder.Services.AddWindowsService();
