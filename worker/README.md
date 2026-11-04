@@ -61,3 +61,49 @@ dotnet publish -c Release -r linux-x64 --self-contained false
 - ترتیب ثابت صف‌ها می‌تواند در بار نامتوازن باعث گرسنگی صف‌های کم‌اولویت‌تر شود؛ Fair scheduling و quota واقعی هر Tenant هنوز پیاده نشده‌اند.
 - Exactly-once تضمین نمی‌شود. اگر Provider پیام را قبول کند ولی Worker پیش از ثبت Complete متوقف شود، احتمال ارسال مجدد وجود دارد. پشتیبانی Provider از Idempotency-Key باید بررسی شود.
 - Build و اجرای Integration Test در این محیط انجام نشده است.
+
+## Tenant Outbox Dispatcher
+
+The Outbox Dispatcher runs as a separate hosted service inside the same .NET Worker process. It does not run inside the queue polling loop. It reads active tenant database records from the Master database table `dbo.TenantDatabases`, builds tenant connections using `ServerName`, `DatabaseName`, `SqlLoginName` and decrypted `SqlPasswordEncrypted`. The `ConnectionStringEncrypted` column is not used by this implementation.
+
+### Configuration
+
+Outbox is disabled by default. Configure the following values in `appsettings.json` or override them through environment variables / a secret provider:
+
+- `TenantRegistry:ConnectionString`: read-only connection to the Master database.
+- `TenantPasswordEncryption:Algorithm`: currently `Aes256Gcm`.
+- `TenantPasswordEncryption:Format`: currently `V1NonceTagCiphertextBase64`.
+- `TenantPasswordEncryption:KeyBase64`: Base64-encoded 32-byte AES-256 key. Keep the real key outside source control.
+- `Outbox:Enabled=true`
+- `Outbox:PollingIntervalSeconds=5`
+- `Outbox:BatchSizePerTenant=10`
+- `Outbox:MaxTenantConcurrency=2`
+- `Outbox:LeaseSeconds=300`
+
+Environment variable examples:
+
+```powershell
+$env:Outbox__Enabled = "true"
+$env:TenantRegistry__ConnectionString = "..."
+$env:TenantPasswordEncryption__KeyBase64 = "..."
+```
+
+The decryptor currently implements only AES-256-GCM with the versioned envelope `v1:Base64(nonce[12] + tag[16] + ciphertext)`. Set the algorithm/format in configuration to match this contract. If the Master application currently encrypts passwords with a different algorithm, envelope, key derivation, or nonce/tag order, the decryptor must be adapted to that existing implementation before enabling Outbox. Do not change or re-encrypt stored credentials based on this sample contract.
+
+### Tenant database migration
+
+Run `database/tenant/001_outbox_schema.sql` once against every tenant operational database before enabling the service. This creates the generic `dbo.OutboxMessages` table and dispatch index. The migration is additive and does not alter the existing tenant `SmsLogs` table.
+
+A business operation that needs to publish an event must insert the outbox row in the SAME transaction as its business-data changes. For SMS, use `JobType=SendSms`, `QueueName=sms`, and JSON payload fields `mobile`, `message`, and optionally `providerCode`. The dispatcher converts that payload into the central `dbo.SmsMessages` row and creates the central job with the existing handler payload shape `{ "smsMessageId": 123 }`. Other job types are transferred with their payload unchanged.
+
+### Delivery and retry behavior
+
+- The dispatcher refreshes the active tenant list on each poll and processes tenants with bounded concurrency.
+- Tenant Outbox rows are claimed atomically using SQL update locks and a lease.
+- Claim increments the attempt counter. Expired leases can be reclaimed; exhausted events move to Dead.
+- Central job insertion is protected by `(TenantId, IdempotencyKey)`, with `EventId` used as the idempotency key. The central SMS row and Job are created in one central SQL transaction.
+- If central publish succeeds but updating the tenant Outbox fails, the next attempt detects the existing central Job and safely marks the tenant event as published.
+- A failure in one tenant is logged and does not stop processing other tenants.
+- Master DB permissions should be read-only; tenant DB permissions should be limited to Outbox SELECT/UPDATE; central DB permissions should be limited to the required Jobs/SmsMessages operations.
+
+This provides at-least-once event transfer with idempotent central job creation; it does not guarantee exactly-once SMS delivery by the external provider. Provider-side idempotency and reconciliation are still required. Build and live integration tests must pass before enabling this service in production.
