@@ -5,5 +5,5 @@ public sealed record TenantDatabase(
     string SqlLoginName, string SqlPasswordEncrypted, string? SchemaVersion);
 
 public sealed record OutboxMessage(
-    long OutboxId, Guid EventId, string EventType, string QueueName, string JobType,
+    long OutboxId, Guid EventId, long TenantId, string EventType, string QueueName, string JobType,
     string Payload, byte Priority, int AttemptCount, int MaxAttempts);
