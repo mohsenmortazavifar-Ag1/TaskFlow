@@ -7,6 +7,11 @@ using TaskFlow.Worker.Services;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+if (OperatingSystem.IsWindows())
+    builder.Services.AddWindowsService();
+else if (OperatingSystem.IsLinux())
+    builder.Services.AddSystemd();
+
 builder.Services.Configure<WorkerOptions>(builder.Configuration.GetSection("Worker"));
 builder.Services.Configure<DatabaseOptions>(builder.Configuration.GetSection("Database"));
 builder.Services.Configure<SmsGatewayOptions>(builder.Configuration.GetSection("SmsGateway"));
@@ -26,7 +31,7 @@ builder.Services.AddHttpClient<ISmsGateway, HttpSmsGateway>((sp, client) =>
 });
 
 builder.Services.AddSingleton<WorkerHeartbeatService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkerHeartbeatService>());
+builder.Services.AddHostedService<WorkerHeartbeatService>(sp => sp.GetRequiredService<WorkerHeartbeatService>());
 builder.Services.AddHostedService<QueuePollingWorker>();
 builder.Services.AddHostedService<ExpiredJobRecoveryService>();
 
