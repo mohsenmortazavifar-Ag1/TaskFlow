@@ -10,6 +10,9 @@ public sealed class CentralJobPublisher(SqlConnectionFactory centralConnections)
 {
     public async Task PublishAsync(long tenantId, OutboxMessage message, CancellationToken ct)
     {
+        if (tenantId != message.TenantId)
+            throw new InvalidOperationException("Outbox tenant ID does not match the tenant registry entry.");
+
         await using var connection = await centralConnections.OpenAsync(ct);
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.Serializable, ct);
 
