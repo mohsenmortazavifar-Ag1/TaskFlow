@@ -21,7 +21,7 @@
 
 ## API
 - GET /api/health اتصال SQL Server را بررسی می‌کند.
-- GET /api/jobs?page=1&pageSize=20 فهرست Jobها را می‌دهد.
+- GET /api/jobs?page=1&pageSize=20 فهرست Jobها را می‌دهد و مانند POST به Header با نام x-taskflow-api-key نیاز دارد.
 - POST /api/jobs برای ثبت Job به Header با نام x-taskflow-api-key نیاز دارد.
 
 نمونه Body:
