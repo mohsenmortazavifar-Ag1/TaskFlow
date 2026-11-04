@@ -1,0 +1,2 @@
+IF DB_ID(N'TaskFlow') IS NULL CREATE DATABASE [TaskFlow];
+GO
