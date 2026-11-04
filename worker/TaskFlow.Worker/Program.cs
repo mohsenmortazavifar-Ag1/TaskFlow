@@ -17,6 +17,9 @@ else if (OperatingSystem.IsLinux())
 builder.Services.Configure<WorkerOptions>(builder.Configuration.GetSection("Worker"));
 builder.Services.Configure<DatabaseOptions>(builder.Configuration.GetSection("Database"));
 builder.Services.Configure<SmsGatewayOptions>(builder.Configuration.GetSection("SmsGateway"));
+builder.Services.Configure<OutboxOptions>(builder.Configuration.GetSection("Outbox"));
+builder.Services.Configure<TenantRegistryOptions>(builder.Configuration.GetSection("TenantRegistry"));
+builder.Services.Configure<TenantPasswordEncryptionOptions>(builder.Configuration.GetSection("TenantPasswordEncryption"));
 
 builder.Services.AddSingleton<SqlConnectionFactory>();
 builder.Services.AddSingleton<JobRepository>();
@@ -36,6 +39,14 @@ builder.Services.AddSingleton<WorkerHeartbeatService>();
 builder.Services.AddHostedService<WorkerHeartbeatService>(sp => sp.GetRequiredService<WorkerHeartbeatService>());
 builder.Services.AddHostedService<QueuePollingWorker>();
 builder.Services.AddHostedService<ExpiredJobRecoveryService>();
+
+// Tenant Outbox Dispatcher is an independent hosted service in the same Worker process.
+builder.Services.AddSingleton<ITenantSecretDecryptor, TenantSecretDecryptor>();
+builder.Services.AddSingleton<TenantRegistryRepository>();
+builder.Services.AddSingleton<TenantSqlConnectionFactory>();
+builder.Services.AddSingleton<TenantOutboxRepository>();
+builder.Services.AddSingleton<CentralJobPublisher>();
+builder.Services.AddHostedService<OutboxDispatcherService>();
 
 var host = builder.Build();
 await host.RunAsync();
