@@ -1,0 +1,23 @@
+name: Worker Build
+
+on:
+  push:
+    branches: [main, feature/dotnet-worker-host]
+    paths: ["worker/**", ".github/workflows/worker-build.yml"]
+  pull_request:
+    paths: ["worker/**", ".github/workflows/worker-build.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore worker/TaskFlow.Worker/TaskFlow.Worker.csproj
+      - run: dotnet build worker/TaskFlow.Worker/TaskFlow.Worker.csproj --configuration Release --no-restore
