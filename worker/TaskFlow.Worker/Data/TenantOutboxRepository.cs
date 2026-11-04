@@ -10,6 +10,13 @@ public sealed class TenantOutboxRepository
         SqlConnection connection, string workerId, int batchSize, int leaseSeconds, CancellationToken ct)
     {
         await using var command = new SqlCommand("""
+            UPDATE dbo.OutboxMessages
+               SET Status = 3,
+                   LastError = COALESCE(LastError, N'Maximum attempts reached after lease expiry.'),
+                   LockedBy = NULL, LockedUntil = NULL
+             WHERE Status = 1 AND LockedUntil < SYSUTCDATETIME()
+               AND AttemptCount >= MaxAttempts;
+
             ;WITH candidates AS
             (
                 SELECT TOP (@BatchSize) *
@@ -17,12 +24,14 @@ public sealed class TenantOutboxRepository
                 WHERE Status IN (0, 1)
                   AND (NextAttemptAt IS NULL OR NextAttemptAt <= SYSUTCDATETIME())
                   AND (Status = 0 OR LockedUntil IS NULL OR LockedUntil < SYSUTCDATETIME())
+                  AND AttemptCount < MaxAttempts
                 ORDER BY Priority DESC, CreatedAt ASC, OutboxId ASC
             )
             UPDATE candidates
                SET Status = 1,
                    LockedBy = @WorkerId,
-                   LockedUntil = DATEADD(SECOND, @LeaseSeconds, SYSUTCDATETIME())
+                   LockedUntil = DATEADD(SECOND, @LeaseSeconds, SYSUTCDATETIME()),
+                   AttemptCount = AttemptCount + 1
             OUTPUT INSERTED.OutboxId, INSERTED.EventId, INSERTED.EventType,
                    INSERTED.QueueName, INSERTED.JobType, INSERTED.Payload,
                    INSERTED.Priority, INSERTED.AttemptCount, INSERTED.MaxAttempts;
@@ -62,13 +71,13 @@ public sealed class TenantOutboxRepository
 
         await using var command = new SqlCommand("""
             UPDATE dbo.OutboxMessages
-               SET AttemptCount = AttemptCount + 1,
-                   Status = CASE WHEN AttemptCount + 1 >= MaxAttempts THEN 3 ELSE 0 END,
+               SET Status = CASE WHEN AttemptCount >= MaxAttempts THEN 3 ELSE 0 END,
                    NextAttemptAt = CASE
-                       WHEN AttemptCount + 1 >= MaxAttempts THEN NULL
+                       WHEN AttemptCount >= MaxAttempts THEN NULL
                        ELSE DATEADD(SECOND,
                            CASE WHEN AttemptCount >= 9 THEN 3600
-                                ELSE CONVERT(int, POWER(CAST(2 AS bigint), AttemptCount) * 5) END,
+                                ELSE CONVERT(int, POWER(CAST(2 AS int),
+                                    CASE WHEN AttemptCount > 8 THEN 8 ELSE AttemptCount END) * 5) END,
                            SYSUTCDATETIME())
                    END,
                    LastError = @Error,
