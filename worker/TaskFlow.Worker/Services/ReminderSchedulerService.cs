@@ -115,7 +115,7 @@ public sealed class ReminderSchedulerService(
 
                     await using var link = new SqlCommand("""
                         UPDATE dbo.ReminderOccurrences
-                        SET JobId = @JobId
+                        SET JobId = @JobId, Status = 1
                         WHERE ReminderOccurrenceId = @OccurrenceId AND Status = 0;
                         """, connection, transaction);
                     link.Parameters.Add("@JobId", SqlDbType.BigInt).Value = jobId;
