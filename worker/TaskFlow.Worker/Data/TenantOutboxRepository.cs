@@ -32,7 +32,7 @@ public sealed class TenantOutboxRepository
                    LockedBy = @WorkerId,
                    LockedUntil = DATEADD(SECOND, @LeaseSeconds, SYSUTCDATETIME()),
                    AttemptCount = AttemptCount + 1
-            OUTPUT INSERTED.OutboxId, INSERTED.EventId, INSERTED.EventType,
+            OUTPUT INSERTED.OutboxId, INSERTED.EventId, INSERTED.TenantId, INSERTED.EventType,
                    INSERTED.QueueName, INSERTED.JobType, INSERTED.Payload,
                    INSERTED.Priority, INSERTED.AttemptCount, INSERTED.MaxAttempts;
             """, connection);
@@ -43,9 +43,9 @@ public sealed class TenantOutboxRepository
         var messages = new List<OutboxMessage>();
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
-            messages.Add(new OutboxMessage(reader.GetInt64(0), reader.GetGuid(1),
-                reader.GetString(2), reader.GetString(3), reader.GetString(4),
-                reader.GetString(5), reader.GetByte(6), reader.GetInt32(7), reader.GetInt32(8)));
+            messages.Add(new OutboxMessage(reader.GetInt64(0), reader.GetGuid(1), reader.GetInt64(2),
+                reader.GetString(3), reader.GetString(4), reader.GetString(5),
+                reader.GetString(6), reader.GetByte(7), reader.GetInt32(8), reader.GetInt32(9)));
         return messages;
     }
 
