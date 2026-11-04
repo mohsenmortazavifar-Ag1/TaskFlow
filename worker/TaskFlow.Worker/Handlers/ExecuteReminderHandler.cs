@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using TaskFlow.Worker.Data;
@@ -30,14 +31,12 @@ public sealed class ExecuteReminderHandler(JobRepository jobs) : IJobHandler
 
         try
         {
-            long scheduleId;
             int occurrenceVersion;
             byte occurrenceStatus;
             long tenantId;
             string reminderType;
             string sourceEntity;
             long sourceEntityId;
-            string timeZoneId;
             int currentVersion;
             bool enabled;
             DateTime dueAtUtc;
@@ -58,14 +57,12 @@ public sealed class ExecuteReminderHandler(JobRepository jobs) : IJobHandler
                 if (!await reader.ReadAsync(cancellationToken))
                     throw new InvalidOperationException($"Reminder occurrence {occurrenceId} was not found.");
 
-                scheduleId = reader.GetInt64(0);
                 occurrenceVersion = reader.GetInt32(1);
                 occurrenceStatus = reader.GetByte(2);
                 tenantId = reader.GetInt64(3);
                 reminderType = reader.GetString(4);
                 sourceEntity = reader.GetString(5);
                 sourceEntityId = reader.GetInt64(6);
-                timeZoneId = reader.GetString(7);
                 currentVersion = reader.GetInt32(8);
                 enabled = reader.GetBoolean(9);
                 dueAtUtc = reader.GetDateTime(10);
