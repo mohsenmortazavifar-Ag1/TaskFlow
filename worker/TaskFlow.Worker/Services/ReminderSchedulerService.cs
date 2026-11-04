@@ -127,7 +127,6 @@ public sealed class ReminderSchedulerService(
                 await using var advance = new SqlCommand("""
                     UPDATE dbo.ReminderSchedules
                     SET NextRunAtUtc = @NextRunAtUtc,
-                        IsEnabled = CASE WHEN @NextRunAtUtc IS NULL THEN 0 ELSE IsEnabled END,
                         UpdatedAt = SYSUTCDATETIME()
                     WHERE ReminderScheduleId = @ScheduleId
                       AND ScheduleVersion = @ScheduleVersion
