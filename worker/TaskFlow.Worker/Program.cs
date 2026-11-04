@@ -18,12 +18,14 @@ builder.Services.Configure<WorkerOptions>(builder.Configuration.GetSection("Work
 builder.Services.Configure<DatabaseOptions>(builder.Configuration.GetSection("Database"));
 builder.Services.Configure<SmsGatewayOptions>(builder.Configuration.GetSection("SmsGateway"));
 builder.Services.Configure<OutboxOptions>(builder.Configuration.GetSection("Outbox"));
+builder.Services.Configure<ReminderOptions>(builder.Configuration.GetSection("Reminder"));
 builder.Services.Configure<TenantRegistryOptions>(builder.Configuration.GetSection("TenantRegistry"));
 builder.Services.Configure<TenantPasswordEncryptionOptions>(builder.Configuration.GetSection("TenantPasswordEncryption"));
 
 builder.Services.AddSingleton<SqlConnectionFactory>();
 builder.Services.AddSingleton<JobRepository>();
 builder.Services.AddSingleton<IJobHandler, SendSmsHandler>();
+builder.Services.AddSingleton<IJobHandler, ExecuteReminderHandler>();
 builder.Services.AddSingleton<JobHandlerRegistry>();
 builder.Services.AddHttpClient<ISmsGateway, HttpSmsGateway>((sp, client) =>
 {
@@ -40,13 +42,14 @@ builder.Services.AddHostedService<WorkerHeartbeatService>(sp => sp.GetRequiredSe
 builder.Services.AddHostedService<QueuePollingWorker>();
 builder.Services.AddHostedService<ExpiredJobRecoveryService>();
 
-// Tenant Outbox Dispatcher is an independent hosted service in the same Worker process.
+// Tenant Outbox Dispatcher, Reminder Scheduler and queue consumers share this Worker process.
 builder.Services.AddSingleton<ITenantSecretDecryptor, TenantSecretDecryptor>();
 builder.Services.AddSingleton<TenantRegistryRepository>();
 builder.Services.AddSingleton<TenantSqlConnectionFactory>();
 builder.Services.AddSingleton<TenantOutboxRepository>();
 builder.Services.AddSingleton<CentralJobPublisher>();
 builder.Services.AddHostedService<OutboxDispatcherService>();
+builder.Services.AddHostedService<ReminderSchedulerService>();
 
 var host = builder.Build();
 await host.RunAsync();
