@@ -21,7 +21,7 @@
 5. داشبورد در http://localhost:3000 در دسترس است.
 
 ## راه‌اندازی Worker
-راهنمای مستقل در [worker/README.md](worker/README.md) قرار دارد. Worker یک Process جدا از Next.js است و به .NET 10 Runtime (در حالت framework-dependent) و دسترسی SQL Server نیاز دارد.
+راهنمای اجرای Worker در [worker/README.md](worker/README.md) و راهنمای نصب سرویس Windows/Linux در [worker/deploy/README.md](worker/deploy/README.md) قرار دارد. Worker یک Process جدا از Next.js است و به .NET 10 Runtime (در حالت framework-dependent) و دسترسی SQL Server نیاز دارد.
 
 ## API
 - GET /api/health اتصال SQL Server را بررسی می‌کند.
