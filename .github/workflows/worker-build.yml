@@ -2,8 +2,8 @@ name: Worker Build
 
 on:
   push:
-    branches: [main, feature/dotnet-worker-host]
-    paths: ["worker/**", ".github/workflows/worker-build.yml"]
+    branches: [main, feature/dotnet-worker-host, feature/outbox-dispatcher]
+    paths: ["worker/**", "database/tenant/**", ".github/workflows/worker-build.yml"]
   pull_request:
     paths: ["worker/**", ".github/workflows/worker-build.yml"]
   workflow_dispatch:
