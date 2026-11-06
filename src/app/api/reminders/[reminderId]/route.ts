@@ -2,7 +2,7 @@ import {NextResponse} from "next/server";
 import {z} from "zod";
 import {hasValidApiKey} from "@/lib/auth";
 import {sql} from "@/lib/db";
-import {getCentralNextRunAtUtc, syncReminderProjection} from "@/lib/reminders";
+import {getCentralReminderCursor, syncReminderProjection} from "@/lib/reminders";
 import {TenantDatabaseError, withTenantDatabase} from "@/lib/tenant-db";
 
 export const runtime = "nodejs";
@@ -58,9 +58,9 @@ export async function PATCH(req: Request, context: {params: Promise<{reminderId:
   const b = parsed.data;
   try {
     const updated = await withTenantDatabase(b.tenantId, b.tenantDatabaseId, async (pool, tenant) => {
-      const centralNextRun = b.nextRunAtUtc
-        ? new Date(b.nextRunAtUtc)
-        : await getCentralNextRunAtUtc(tenant, reminderId);
+      const centralCursor = b.nextRunAtUtc
+        ? {exists: true, nextRunAtUtc: new Date(b.nextRunAtUtc)}
+        : await getCentralReminderCursor(tenant, reminderId);
       const transaction = new sql.Transaction(pool);
       await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
       try {
@@ -82,7 +82,7 @@ export async function PATCH(req: Request, context: {params: Promise<{reminderId:
           sourceEntityId: b.sourceEntityId ?? current.SourceEntityId,
           ruleJson: b.rule ? JSON.stringify(b.rule) : current.RuleJson,
           timeZoneId: b.timeZoneId ?? current.TimeZoneId,
-          nextRunAtUtc: centralNextRun ?? current.NextRunAtUtc,
+          nextRunAtUtc: centralCursor.exists ? centralCursor.nextRunAtUtc : current.NextRunAtUtc,
           scheduleVersion: current.ScheduleVersion + 1
         };
 
