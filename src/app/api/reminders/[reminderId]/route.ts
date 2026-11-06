@@ -187,7 +187,8 @@ export async function DELETE(req: Request, context: {params: Promise<{reminderId
             OUTPUT INSERTED.ReminderScheduleId, INSERTED.ReminderType, INSERTED.SourceEntity,
                    INSERTED.SourceEntityId, INSERTED.RuleJson, INSERTED.TimeZoneId,
                    INSERTED.ScheduleVersion, INSERTED.IsEnabled, INSERTED.NextRunAtUtc,
-                   INSERTED.UpdatedAt;
+                   INSERTED.UpdatedAt
+            WHERE ReminderScheduleId = @ReminderScheduleId;
           `);
         await transaction.commit();
         const row = update.recordset[0];
