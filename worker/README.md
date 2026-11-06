@@ -143,3 +143,29 @@ Environment variables include `Reminder__Enabled`, `Reminder__PollingIntervalSec
 When a reminder's business rule or target changes, update `RuleJson`/other schedule fields and increment `ScheduleVersion`. Disable a schedule by setting `IsEnabled=0`. This invalidates already queued jobs from older versions when their handler executes. A recurrence with no `intervalValue` is one-shot: `NextRunAtUtc` becomes NULL after materialization, while `IsEnabled` remains true so its already-created job can still pass the handler's enabled-schedule check. Set `IsEnabled=0` explicitly to cancel pending occurrences.
 
 This first implementation assumes reminder definitions and customer contact/message snapshots are stored in central `dbo.ReminderSchedules.RuleJson`. It does not yet query tenant operational databases for reminder definitions, nor does it implement business-specific event triggers (for example, "three days after repair completion"). Those definitions must be created/updated by the tenant-facing business workflow and projected into the central schedule table before this scheduler can process them. Validate time-zone IDs and RuleJson at write time; malformed due rules currently fail the batch and require operator correction.
+
+
+## Tenant Reminder synchronization
+
+The Worker reads active tenant database connection metadata from `MasterRepair.dbo.TenantDatabases`
+through `TenantRegistry:ConnectionString`. Configure that connection string with
+`Initial Catalog=MasterRepair`; the registry query uses `ServerName`, `DatabaseName`,
+`SqlLoginName`, and decrypted `SqlPasswordEncrypted`. `ConnectionStringEncrypted` is not used.
+
+Apply `database/tenant/002_reminder_schedules.sql` to every tenant database. Tenant
+`dbo.ReminderSchedules` is the source of truth. The Worker periodically reads changed
+definitions and upserts their central projection, keyed by
+`(TenantDatabaseId, TenantReminderScheduleId)`. The central database keeps execution
+progress (`NextRunAtUtc`) after a definition is synchronized. Changes must update
+`UpdatedAt` and increment `ScheduleVersion`; disable rows instead of deleting them.
+
+Apply `database/005_tenant_reminder_sync.sql` to the central TaskFlow database before
+enabling `Reminder:TenantSyncEnabled`. Set `TenantRegistry:ConnectionString` to the
+MasterRepair database and provide the actual password encryption key/format through
+the configured secret mechanism. The current decryptor only supports AES-256-GCM v1;
+the encrypted password format in MasterRepair must match it.
+
+Tenant sync runs in the same Worker process, sequentially per tenant, and isolates
+tenant connection/schema failures so one tenant does not stop the others. The sync
+poll interval defaults to 60 seconds. SQL Server integration and production encryption
+compatibility must be verified before production rollout.
