@@ -66,3 +66,25 @@ export async function syncReminderProjection(
       COMMIT TRANSACTION;
     `);
 }
+
+/**
+ * The central scheduler advances NextRunAtUtc independently of the tenant definition.
+ * When editing a definition without an explicit new due time, preserve that central cursor
+ * rather than restoring the stale initial value still stored in the tenant database.
+ */
+export async function getCentralNextRunAtUtc(
+  tenant: TenantDatabaseRef,
+  reminderScheduleId: string
+): Promise<Date | null> {
+  const pool = await getPool();
+  const result = await pool.request()
+    .input("TenantDatabaseId", sql.BigInt, tenant.tenantDatabaseId)
+    .input("TenantReminderScheduleId", sql.BigInt, reminderScheduleId)
+    .query(`
+      SELECT NextRunAtUtc
+      FROM dbo.ReminderSchedules
+      WHERE TenantDatabaseId = @TenantDatabaseId
+        AND TenantReminderScheduleId = @TenantReminderScheduleId;
+    `);
+  return result.recordset[0]?.NextRunAtUtc ?? null;
+}
