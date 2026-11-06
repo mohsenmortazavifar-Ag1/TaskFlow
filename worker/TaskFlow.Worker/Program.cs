@@ -21,11 +21,13 @@ builder.Services.Configure<OutboxOptions>(builder.Configuration.GetSection("Outb
 builder.Services.Configure<ReminderOptions>(builder.Configuration.GetSection("Reminder"));
 builder.Services.Configure<TenantRegistryOptions>(builder.Configuration.GetSection("TenantRegistry"));
 builder.Services.Configure<TenantPasswordEncryptionOptions>(builder.Configuration.GetSection("TenantPasswordEncryption"));
+builder.Services.Configure<TaskFlowApiOptions>(builder.Configuration.GetSection("TaskFlowApi"));
 
 builder.Services.AddSingleton<SqlConnectionFactory>();
 builder.Services.AddSingleton<JobRepository>();
 builder.Services.AddSingleton<IJobHandler, SendSmsHandler>();
 builder.Services.AddSingleton<IJobHandler, ExecuteReminderHandler>();
+builder.Services.AddSingleton<IJobHandler, ProcessReminderEventHandler>();
 builder.Services.AddSingleton<JobHandlerRegistry>();
 builder.Services.AddHttpClient<ISmsGateway, HttpSmsGateway>((sp, client) =>
 {
@@ -35,6 +37,11 @@ builder.Services.AddHttpClient<ISmsGateway, HttpSmsGateway>((sp, client) =>
     client.Timeout = TimeSpan.FromSeconds(Math.Clamp(options.TimeoutSeconds, 5, 120));
     if (!string.IsNullOrWhiteSpace(options.ApiKey))
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
+});
+builder.Services.AddHttpClient("TaskFlowReminderEvents", (sp, client) =>
+{
+    var options = sp.GetRequiredService<IOptions<TaskFlowApiOptions>>().Value;
+    client.Timeout = TimeSpan.FromSeconds(Math.Clamp(options.TimeoutSeconds, 5, 120));
 });
 
 builder.Services.AddSingleton<WorkerHeartbeatService>();
