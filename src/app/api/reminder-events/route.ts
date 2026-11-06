@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 const eventSchema = z.object({
   tenantId: z.number().int().positive(),
-  tenantDatabaseId: z.number().int().positive().optional(),
+  tenantDatabaseId: z.number().int().positive(),
   eventId: z.string().uuid(),
   eventType: z.string().trim().min(1).max(100).regex(/^[A-Za-z][A-Za-z0-9_.-]*$/),
   sourceEntity: z.string().trim().min(1).max(100),
@@ -36,7 +36,7 @@ type EventRule = {
 
 function renderTemplate(template: string, values: Record<string, string>): string {
   return template.replace(/{{\s*([A-Za-z][A-Za-z0-9_]*)\s*}}/g, (_match, key: string) => {
-    if (!(key in values)) throw new Error(`Missing event template value: ${key}`);
+    if (!(key in values)) throw new Error(`EVENT_MISSING_TEMPLATE_VALUE:${key}`);
     return values[key];
   });
 }
