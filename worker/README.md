@@ -225,3 +225,49 @@ Create request example:
 An edit request uses the same fields optionally, plus `expectedScheduleVersion`.
 The API increments `ScheduleVersion` for every edit/cancellation so already queued
 old-version reminder jobs are skipped by the Worker.
+
+
+## Business event integration
+
+The tenant application should publish domain events to the internal
+`POST /api/reminder-events` endpoint after the business transaction commits. The
+event endpoint resolves the tenant database through MasterRepair and reads enabled
+`dbo.ReminderEventRules` for the supplied event type. Each matching rule creates a
+tenant-local `dbo.ReminderSchedules` row; the existing Worker sync service projects
+that row to central TaskFlow, where the Reminder Scheduler materializes its due job.
+
+The tenant migration `database/tenant/003_reminder_event_rules.sql` creates:
+- `ReminderEventRules`: event-to-reminder mapping, delay, timezone, SMS templates,
+  optional recurrence and local delivery time.
+- `ReminderEventInbox`: unique EventId inbox to make event retries idempotent.
+
+Template placeholders use `{{key}}` syntax and are resolved from the event's
+string-valued `data` object plus `eventId`, `eventType`, `sourceEntity`,
+`sourceEntityId`, and `occurredAtUtc`. Unknown placeholders reject the event.
+An example rule for a repair completion event can use EventType=`RepairCompleted`,
+DelayMinutes=4320, MobileTemplate=`{{customerMobile}}`, and a MessageTemplate
+containing `{{customerName}}` / `{{repairOrderNumber}}`.
+
+Example event payload:
+
+```json
+{
+  "tenantId": 123,
+  "eventId": "5b2f4e2a-8f6b-4a1a-9a3b-2c9b0d4f2d10",
+  "eventType": "RepairCompleted",
+  "sourceEntity": "RepairOrder",
+  "sourceEntityId": "9876",
+  "occurredAtUtc": "2026-11-06T10:30:00.000Z",
+  "data": {
+    "customerMobile": "09120000000",
+    "customerName": "Customer",
+    "repairOrderNumber": "R-2026-00987"
+  }
+}
+```
+
+The business app must generate a stable EventId and persist/retry delivery (ideally
+using its own transactional outbox) so a network timeout can be retried safely.
+Do not call this endpoint before the repair-completion transaction commits. A duplicate
+EventId returns the previous outcome and does not create another reminder. Rules are
+tenant-specific configuration and must be inserted/managed in each tenant database.
