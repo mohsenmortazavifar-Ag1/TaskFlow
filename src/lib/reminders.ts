@@ -72,10 +72,10 @@ export async function syncReminderProjection(
  * When editing a definition without an explicit new due time, preserve that central cursor
  * rather than restoring the stale initial value still stored in the tenant database.
  */
-export async function getCentralNextRunAtUtc(
+export async function getCentralReminderCursor(
   tenant: TenantDatabaseRef,
   reminderScheduleId: string
-): Promise<Date | null> {
+): Promise<{exists: boolean; nextRunAtUtc: Date | null}> {
   const pool = await getPool();
   const result = await pool.request()
     .input("TenantDatabaseId", sql.BigInt, tenant.tenantDatabaseId)
@@ -86,5 +86,6 @@ export async function getCentralNextRunAtUtc(
       WHERE TenantDatabaseId = @TenantDatabaseId
         AND TenantReminderScheduleId = @TenantReminderScheduleId;
     `);
-  return result.recordset[0]?.NextRunAtUtc ?? null;
+  if (result.recordset.length === 0) return {exists: false, nextRunAtUtc: null};
+  return {exists: true, nextRunAtUtc: result.recordset[0].NextRunAtUtc ?? null};
 }
