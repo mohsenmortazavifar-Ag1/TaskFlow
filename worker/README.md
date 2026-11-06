@@ -169,3 +169,59 @@ Tenant sync runs in the same Worker process, sequentially per tenant, and isolat
 tenant connection/schema failures so one tenant does not stop the others. The sync
 poll interval defaults to 60 seconds. SQL Server integration and production encryption
 compatibility must be verified before production rollout.
+
+
+## Reminder Management API
+
+The API is an internal service-to-service API. All routes require the existing
+`x-taskflow-api-key` header and must only be called by a trusted backend (never expose
+this key in browser code). The upstream Central API must authenticate the caller and
+derive `tenantId` from the validated tenant token; do not trust a tenant ID supplied by
+an untrusted browser.
+
+The API resolves the tenant database through `MasterRepair.dbo.TenantDatabases`.
+Configure the Next.js process with `MASTER_DB_SERVER`, `MASTER_DB_PORT`,
+`MASTER_DB_NAME=MasterRepair`, `MASTER_DB_USER`, `MASTER_DB_PASSWORD`,
+`TENANT_PASSWORD_ENCRYPTION_KEY_BASE64`, and
+`TENANT_DB_TRUST_SERVER_CERTIFICATE`. Passwords must use the same
+`v1:Base64(nonce[12] + tag[16] + ciphertext)` AES-256-GCM envelope used by the Worker.
+
+### Endpoints
+
+- `GET /api/reminders?tenantId=123&tenantDatabaseId=456` lists reminder definitions.
+- `POST /api/reminders` creates a definition in the tenant database and immediately
+  projects it into central `dbo.ReminderSchedules`.
+- `PATCH /api/reminders/{reminderScheduleId}` edits a definition. The request must include
+  `tenantId` and `expectedScheduleVersion`; a stale version returns HTTP 409.
+- `DELETE /api/reminders/{reminderScheduleId}?tenantId=123&expectedScheduleVersion=1`
+  disables the definition, increments its version, and clears `NextRunAtUtc`.
+  It does not physically delete reminder history.
+
+If a tenant has multiple active database records in MasterRepair, callers must also send
+`tenantDatabaseId`; otherwise the API returns HTTP 409. If tenant persistence succeeds
+but central projection is temporarily unavailable, the API returns HTTP 202 and the
+Worker's periodic tenant synchronization will reconcile the central projection.
+
+Create request example:
+
+```json
+{
+  "tenantId": 123,
+  "reminderType": "RepairFollowUp",
+  "sourceEntity": "RepairOrder",
+  "sourceEntityId": 9876,
+  "timeZoneId": "Asia/Tehran",
+  "nextRunAtUtc": "2026-11-10T08:00:00.000Z",
+  "rule": {
+    "mobile": "09120000000",
+    "message": "یادآوری سرویس دستگاه",
+    "intervalValue": 6,
+    "intervalUnit": "month",
+    "localTime": "11:00"
+  }
+}
+```
+
+An edit request uses the same fields optionally, plus `expectedScheduleVersion`.
+The API increments `ScheduleVersion` for every edit/cancellation so already queued
+old-version reminder jobs are skipped by the Worker.
