@@ -42,7 +42,7 @@ function errorResponse(error: unknown) {
 }
 
 function parseId(value: string): string | null {
-  return /^\d{1,19}$/.test(value) && BigInt(value) > 0n ? value : null;
+  return /^\d{1,19}$/.test(value) && BigInt(value) > BigInt(0) ? value : null;
 }
 
 export async function PATCH(req: Request, context: {params: Promise<{reminderId: string}>}) {
