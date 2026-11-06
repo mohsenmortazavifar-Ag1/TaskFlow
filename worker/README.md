@@ -1,273 +1,86 @@
 # TaskFlow .NET Worker Host
 
-این پروژه یک Process مستقل برای Claim و اجرای Jobهای دیتابیس TaskFlow است. هدف این مرحله ایجاد چرخه اجرایی پایه است؛ نه ادعای آماده‌بودن برای Production.
+این پروژه یک Process مستقل برای Claim و اجرای Jobهای دیتابیس TaskFlow است.
 
 ## نیازمندی‌ها
 - .NET 10 SDK برای Build/Publish
 - دسترسی شبکه‌ای Worker به SQL Server و دیتابیس TaskFlow
-- دسترسی خروجی HTTPS به SMS Gateway
-- اجرای اسکریپت‌های دیتابیس TaskFlow تا مرحله `004_procedures.sql`
+- دسترسی شبکه‌ای به MasterRepair و دیتابیس‌های عملیاتی Tenantها
+- دسترسی خروجی HTTPS به SMS Gateway و TaskFlow API
 
-## تنظیمات
-تنظیمات را از Environment Variables یا Secret Store تزریق کنید؛ Secret را در appsettings یا Git قرار ندهید.
+## تنظیمات اصلی
 
-متغیرهای اصلی:
-- `Database__ConnectionString`: اتصال BackgroundDB
-- `Worker__WorkerId`: شناسه ثابت و یکتای این Process؛ در صورت خالی بودن، شناسه خودکار ساخته می‌شود.
+تمام Secretها را از Environment Variables یا Secret Store تزریق کنید؛ Secret را در appsettings یا Git قرار ندهید.
+
+- `Database__ConnectionString`: اتصال BackgroundDB مرکزی
+- `TenantRegistry__ConnectionString`: اتصال read-only به MasterRepair
+- `TenantPasswordEncryption__KeyBase64`: کلید واقعی سازگار با رمزنگاری رمز Tenantها
+- `Worker__WorkerId`: شناسه این Process
 - `Worker__MaxConcurrency`: سقف کلی Jobهای هم‌زمان
-- `Worker__PollingIntervalMilliseconds`: فاصله Poll
-- `Worker__RecoveryIntervalSeconds`: فاصله بازیابی Leaseهای منقضی‌شده
-- `SmsGateway__BaseUrl`: آدرس Base سرویس پیامک
-- `SmsGateway__SendPath`: مسیر ارسال
-- `SmsGateway__ApiKey`: کلید API
+- `SmsGateway__BaseUrl`, `SmsGateway__SendPath`, `SmsGateway__ApiKey`: اتصال Provider پیامک
+- `TaskFlowApi__BaseUrl`: آدرس پایه Next.js TaskFlow
+- `TaskFlowApi__ReminderEventsPath=/api/reminder-events`
+- `TaskFlowApi__ApiKey`: همان کلید سروری که TaskFlow API در `TASKFLOW_API_KEY` می‌پذیرد
+- `TaskFlowApi__TimeoutSeconds=20`
 
 ## رفتار اجرا
 - Queueهای فعال از `dbo.JobQueues` خوانده می‌شوند.
-- محدودیت کلی هم‌زمانی از `Worker:MaxConcurrency` و محدودیت هر صف از `JobQueues.MaxConcurrency` اعمال می‌شود.
-- Job با Stored Procedure `dbo.ClaimJobs` و BatchSize=1 Claim می‌شود.
+- Job با Stored Procedure `dbo.ClaimJobs` Claim می‌شود.
 - Handler با مقدار `JobType` انتخاب می‌شود.
 - موفقیت با `dbo.CompleteJob` و خطا با `dbo.FailJob` ثبت می‌شود.
 - تلاش‌ها در `dbo.JobAttempts` ذخیره می‌شوند.
 - Heartbeat در `dbo.WorkerInstances` ثبت می‌شود.
-- سرویس داخلی Recovery به‌صورت دوره‌ای `dbo.RecoverExpiredJobs` را اجرا می‌کند.
-- در زمان توقف، Job نیمه‌تمام Complete یا Fail نمی‌شود؛ Lease آن منقضی می‌شود و Recovery می‌تواند آن را دوباره Claim کند.
-
-## قرارداد HTTP آداپتور پیامک
-آداپتور فعلی یک قرارداد عمومی نمونه است، نه اتصال تأییدشده به پنل خاص. درخواست POST شامل `mobile`, `message`, `senderNumber`, `tenantId` است و Header با نام `Idempotency-Key` ارسال می‌شود. پاسخ موفق باید JSON با `{"accepted":true,"providerMessageId":"..." }` باشد. قبل از Production باید این Adapter دقیقاً با مستندات Provider واقعی تطبیق داده و تست شود.
-
-## اجرا
-از پوشه `worker/TaskFlow.Worker`:
-```powershell
-dotnet restore
-dotnet run
-```
-
-Publish برای Windows:
-```powershell
-dotnet publish -c Release -r win-x64 --self-contained false
-```
-
-Publish برای Linux:
-```bash
-dotnet publish -c Release -r linux-x64 --self-contained false
-```
-
-پروژه به‌صورت خودکار integration مربوط به Windows Service یا systemd را بر اساس سیستم‌عامل فعال می‌کند. برای اجرای دائمی، خروجی Publish را به سرویس سیستم بسپارید و Restart policy و دسترسی حداقلی فایل/شبکه را فعال کنید.
-
-## محدودیت‌های شناخته‌شده این مرحله
-- Handler عملیاتی فقط برای `SendSms` ثبت شده است.
-- قرارداد Gateway عمومی است و هنوز به Provider واقعی متصل نشده.
-- زمان‌بندی Recovery انجام می‌شود، اما مانیتورینگ و هشداردهی آن هنوز کامل نیست.
-- ترتیب ثابت صف‌ها می‌تواند در بار نامتوازن باعث گرسنگی صف‌های کم‌اولویت‌تر شود؛ Fair scheduling و quota واقعی هر Tenant هنوز پیاده نشده‌اند.
-- Exactly-once تضمین نمی‌شود. اگر Provider پیام را قبول کند ولی Worker پیش از ثبت Complete متوقف شود، احتمال ارسال مجدد وجود دارد. پشتیبانی Provider از Idempotency-Key باید بررسی شود.
-- Build و اجرای Integration Test در این محیط انجام نشده است.
+- Recovery، Jobهای دارای Lease منقضی‌شده را بازیابی می‌کند.
 
 ## Tenant Outbox Dispatcher
 
-The Outbox Dispatcher runs as a separate hosted service inside the same .NET Worker process. It does not run inside the queue polling loop. It reads active tenant database records from the Master database table `dbo.TenantDatabases`, builds tenant connections using `ServerName`, `DatabaseName`, `SqlLoginName` and decrypted `SqlPasswordEncrypted`. The `ConnectionStringEncrypted` column is not used by this implementation.
+Outbox Dispatcher در همان Worker Process اجرا می‌شود. از MasterRepair، جدول `dbo.TenantDatabases` را می‌خواند و با `ServerName`, `DatabaseName`, `SqlLoginName`, `SqlPasswordEncrypted` به دیتابیس عملیاتی Tenant متصل می‌شود. ستون `ConnectionStringEncrypted` استفاده نمی‌شود.
 
-### Configuration
+تنظیمات:
+- `Outbox__Enabled=true`
+- `Outbox__PollingIntervalSeconds=5`
+- `Outbox__BatchSizePerTenant=10`
+- `Outbox__MaxTenantConcurrency=2`
+- `Outbox__LeaseSeconds=300`
 
-Outbox is disabled by default. Configure the following values in `appsettings.json` or override them through environment variables / a secret provider:
+پیش از فعال‌سازی، `database/tenant/001_outbox_schema.sql` را روی تمام Tenant DBها اجرا کنید. Dispatcher رکوردها را با Lease اتمیک Claim می‌کند و با `EventId` به‌عنوان idempotency key در صف مرکزی ثبت می‌کند. خطاهای موقت با backoff retry می‌شوند و بعد از اتمام تلاش‌ها به Dead می‌روند.
 
-- `TenantRegistry:ConnectionString`: read-only connection to the Master database.
-- `TenantPasswordEncryption:Algorithm`: currently `Aes256Gcm`.
-- `TenantPasswordEncryption:Format`: currently `V1NonceTagCiphertextBase64`.
-- `TenantPasswordEncryption:KeyBase64`: Base64-encoded 32-byte AES-256 key. Keep the real key outside source control.
-- `Outbox:Enabled=true`
-- `Outbox:PollingIntervalSeconds=5`
-- `Outbox:BatchSizePerTenant=10`
-- `Outbox:MaxTenantConcurrency=2`
-- `Outbox:LeaseSeconds=300`
+## Business Event -> Reminder
 
-Environment variable examples:
+Handler با نام `ProcessReminderEvent` رویدادهای دامنه را از صف مرکزی به `POST /api/reminder-events` می‌فرستد. این Handler:
+- TenantId داخل payload را با TenantId خود Job مقایسه می‌کند.
+- فقط HTTPS را در محیط غیرمحلی قبول می‌کند.
+- API key را فقط در Header `x-taskflow-api-key` می‌فرستد.
+- هر پاسخ 2xx از جمله پاسخ duplicate را موفق تلقی می‌کند.
+- timeout و پاسخ غیر 2xx را به Queue برمی‌گرداند تا Job طبق سیاست Retry دوباره اجرا شود.
 
+نمونه تنظیم Environment:
 ```powershell
 $env:Outbox__Enabled = "true"
-$env:TenantRegistry__ConnectionString = "..."
-$env:TenantPasswordEncryption__KeyBase64 = "..."
+$env:TaskFlowApi__BaseUrl = "https://taskflow.example.com"
+$env:TaskFlowApi__ApiKey = "<secret>"
+$env:TenantRegistry__ConnectionString = "<MasterRepair read-only connection>"
+$env:TenantPasswordEncryption__KeyBase64 = "<base64 key>"
 ```
 
-The decryptor currently implements only AES-256-GCM with the versioned envelope `v1:Base64(nonce[12] + tag[16] + ciphertext)`. Set the algorithm/format in configuration to match this contract. If the Master application currently encrypts passwords with a different algorithm, envelope, key derivation, or nonce/tag order, the decryptor must be adapted to that existing implementation before enabling Outbox. Do not change or re-encrypt stored credentials based on this sample contract.
+در Repair، رویداد `RepairCompleted` در همان تراکنش تغییر وضعیت به `Repaired` در `dbo.OutboxMessages` ثبت می‌شود. Worker آن را به Job مرکزی `ProcessReminderEvent` تبدیل می‌کند. API رویداد در Tenant DB، `ReminderEventInbox` و `ReminderSchedules` را به‌صورت idempotent ثبت می‌کند؛ سرویس Tenant Reminder Sync سپس Schedule را به دیتابیس مرکزی منتقل می‌کند.
 
-### Tenant database migration
+پیش از فعال‌سازی، migrationهای زیر باید روی هر Tenant DB اجرا شده باشند:
+1. `database/tenant/001_outbox_schema.sql`
+2. `database/tenant/002_reminder_schedules.sql`
+3. `database/tenant/003_reminder_event_rules.sql`
 
-Run `database/tenant/001_outbox_schema.sql` once against every tenant operational database before enabling the service. This creates the generic `dbo.OutboxMessages` table and dispatch index. The migration is additive and does not alter the existing tenant `SmsLogs` table.
+همچنین باید برای `EventType=RepairCompleted` یک Rule فعال در `dbo.ReminderEventRules` همان Tenant وجود داشته باشد. Placeholderهای قابل استفاده در این event عبارت‌اند از `{{customerMobile}}`, `{{customerName}}`, `{{repairOrderNumber}}`.
 
-A business operation that needs to publish an event must insert the outbox row in the SAME transaction as its business-data changes. For SMS, use `JobType=SendSms`, `QueueName=sms`, and JSON payload fields `mobile`, `message`, and optionally `providerCode`. The dispatcher converts that payload into the central `dbo.SmsMessages` row and creates the central job with the existing handler payload shape `{ "smsMessageId": 123 }`. Other job types are transferred with their payload unchanged.
+## محدودیت‌ها و راه‌اندازی
+- Outbox انتقال at-least-once با ثبت مرکزی idempotent فراهم می‌کند؛ ارسال SMS به Provider دقیقاً یک‌بار تضمین نمی‌شود.
+- API Key یک credential داخلی مشترک است و باید فقط به Worker مورد اعتماد داده شود؛ هرگز در Frontend قرار نگیرد.
+- رمزنگاری MasterRepair باید با decryptor فعلی AES-256-GCM v1 سازگار باشد. این سازگاری باید قبل از فعال‌سازی در محیط واقعی تست شود.
+- SQL Server integration tests و build باید قبل از Production اجرا شوند.
 
-### Delivery and retry behavior
-
-- The dispatcher refreshes the active tenant list on each poll and processes tenants with bounded concurrency.
-- Tenant Outbox rows are claimed atomically using SQL update locks and a lease.
-- Claim increments the attempt counter. Expired leases can be reclaimed; exhausted events move to Dead.
-- Central job insertion is protected by `(TenantId, IdempotencyKey)`, with `EventId` used as the idempotency key. The central SMS row and Job are created in one central SQL transaction.
-- If central publish succeeds but updating the tenant Outbox fails, the next attempt detects the existing central Job and safely marks the tenant event as published.
-- A failure in one tenant is logged and does not stop processing other tenants.
-- Master DB permissions should be read-only; tenant DB permissions should be limited to Outbox SELECT/UPDATE; central DB permissions should be limited to the required Jobs/SmsMessages operations.
-
-This provides at-least-once event transfer with idempotent central job creation; it does not guarantee exactly-once SMS delivery by the external provider. Provider-side idempotency and reconciliation are still required. Build and live integration tests must pass before enabling this service in production.
-
-
-## Reminder Scheduler and Handler
-
-The Reminder Scheduler is enabled by default and runs inside the same Worker process. It reads due rows from the central `dbo.ReminderSchedules` table, creates a `dbo.ReminderOccurrences` row and an `ExecuteReminder` job in a single SQL transaction, then advances the schedule. Due rows are claimed with SQL update locks so two scheduler instances do not materialize the same due time concurrently. The unique key on `ReminderOccurrences(ReminderScheduleId, ScheduleVersion, DueAtUtc)` is the database-level duplicate guard.
-
-The `ExecuteReminder` handler re-reads the occurrence and current schedule before acting. Disabled schedules and occurrences from an old ScheduleVersion are marked skipped. Valid occurrences create a central `SmsMessages` row and a `SendSms` job atomically; the SMS handler/provider remains responsible for actual delivery. An occurrence is marked as queued for SMS, not as provider-delivered.
-
-### Reminder RuleJson contract
-
-Required JSON fields are `mobile` and `message`. Optional fields:
-
-- `providerCode`: provider selection override.
-- `intervalValue` and `intervalUnit`: recurrence; units are `day`, `month`, or `year`. Omit both for a one-shot reminder.
-- `localTime`: optional local wall-clock time in `HH:mm` format for the next recurrence.
-
-Example recurring six-month filter reminder:
-
-```json
-{
-  "mobile": "09120000000",
-  "message": "زمان تعویض فیلتر دستگاه شما فرا رسیده است.",
-  "providerCode": "default",
-  "intervalValue": 6,
-  "intervalUnit": "month",
-  "localTime": "10:00"
-}
+اجرا از پوشه `worker/TaskFlow.Worker`:
+```powershell
+dotnet restore
+dotnet build -c Release
+dotnet run
 ```
-
-Set `ReminderSchedules.NextRunAtUtc` to the first due instant in UTC and `TimeZoneId` to a valid system time-zone ID. The scheduler calculates future dates in the tenant's local time zone, then stores UTC. Daylight-saving gaps are advanced to the first valid local minute; ambiguous local times are resolved deterministically.
-
-Environment variables include `Reminder__Enabled`, `Reminder__PollingIntervalSeconds`, and `Reminder__BatchSize`. Keep `Reminder__MaxConcurrency` at 1 for now; the scheduler serializes each materialization batch transaction.
-
-When a reminder's business rule or target changes, update `RuleJson`/other schedule fields and increment `ScheduleVersion`. Disable a schedule by setting `IsEnabled=0`. This invalidates already queued jobs from older versions when their handler executes. A recurrence with no `intervalValue` is one-shot: `NextRunAtUtc` becomes NULL after materialization, while `IsEnabled` remains true so its already-created job can still pass the handler's enabled-schedule check. Set `IsEnabled=0` explicitly to cancel pending occurrences.
-
-This first implementation assumes reminder definitions and customer contact/message snapshots are stored in central `dbo.ReminderSchedules.RuleJson`. It does not yet query tenant operational databases for reminder definitions, nor does it implement business-specific event triggers (for example, "three days after repair completion"). Those definitions must be created/updated by the tenant-facing business workflow and projected into the central schedule table before this scheduler can process them. Validate time-zone IDs and RuleJson at write time; malformed due rules currently fail the batch and require operator correction.
-
-
-## Tenant Reminder synchronization
-
-The Worker reads active tenant database connection metadata from `MasterRepair.dbo.TenantDatabases`
-through `TenantRegistry:ConnectionString`. Configure that connection string with
-`Initial Catalog=MasterRepair`; the registry query uses `ServerName`, `DatabaseName`,
-`SqlLoginName`, and decrypted `SqlPasswordEncrypted`. `ConnectionStringEncrypted` is not used.
-
-Apply `database/tenant/002_reminder_schedules.sql` to every tenant database. Tenant
-`dbo.ReminderSchedules` is the source of truth. The Worker periodically reads changed
-definitions and upserts their central projection, keyed by
-`(TenantDatabaseId, TenantReminderScheduleId)`. The central database keeps execution
-progress (`NextRunAtUtc`) after a definition is synchronized. Changes must update
-`UpdatedAt` and increment `ScheduleVersion`; disable rows instead of deleting them.
-
-Apply `database/005_tenant_reminder_sync.sql` to the central TaskFlow database before
-enabling `Reminder:TenantSyncEnabled`. Set `TenantRegistry:ConnectionString` to the
-MasterRepair database and provide the actual password encryption key/format through
-the configured secret mechanism. The current decryptor only supports AES-256-GCM v1;
-the encrypted password format in MasterRepair must match it.
-
-Tenant sync runs in the same Worker process, sequentially per tenant, and isolates
-tenant connection/schema failures so one tenant does not stop the others. The sync
-poll interval defaults to 60 seconds. SQL Server integration and production encryption
-compatibility must be verified before production rollout.
-
-
-## Reminder Management API
-
-The API is an internal service-to-service API. All routes require the existing
-`x-taskflow-api-key` header and must only be called by a trusted backend (never expose
-this key in browser code). The upstream Central API must authenticate the caller and
-derive `tenantId` from the validated tenant token; do not trust a tenant ID supplied by
-an untrusted browser.
-
-The API resolves the tenant database through `MasterRepair.dbo.TenantDatabases`.
-Configure the Next.js process with `MASTER_DB_SERVER`, `MASTER_DB_PORT`,
-`MASTER_DB_NAME=MasterRepair`, `MASTER_DB_USER`, `MASTER_DB_PASSWORD`,
-`TENANT_PASSWORD_ENCRYPTION_KEY_BASE64`, and
-`TENANT_DB_TRUST_SERVER_CERTIFICATE`. Passwords must use the same
-`v1:Base64(nonce[12] + tag[16] + ciphertext)` AES-256-GCM envelope used by the Worker.
-
-### Endpoints
-
-- `GET /api/reminders?tenantId=123&tenantDatabaseId=456` lists reminder definitions.
-- `POST /api/reminders` creates a definition in the tenant database and immediately
-  projects it into central `dbo.ReminderSchedules`.
-- `PATCH /api/reminders/{reminderScheduleId}` edits a definition. The request must include
-  `tenantId` and `expectedScheduleVersion`; a stale version returns HTTP 409.
-- `DELETE /api/reminders/{reminderScheduleId}?tenantId=123&expectedScheduleVersion=1`
-  disables the definition, increments its version, and clears `NextRunAtUtc`.
-  It does not physically delete reminder history.
-
-If a tenant has multiple active database records in MasterRepair, callers must also send
-`tenantDatabaseId`; otherwise the API returns HTTP 409. If tenant persistence succeeds
-but central projection is temporarily unavailable, the API returns HTTP 202 and the
-Worker's periodic tenant synchronization will reconcile the central projection.
-
-Create request example:
-
-```json
-{
-  "tenantId": 123,
-  "reminderType": "RepairFollowUp",
-  "sourceEntity": "RepairOrder",
-  "sourceEntityId": 9876,
-  "timeZoneId": "Asia/Tehran",
-  "nextRunAtUtc": "2026-11-10T08:00:00.000Z",
-  "rule": {
-    "mobile": "09120000000",
-    "message": "یادآوری سرویس دستگاه",
-    "intervalValue": 6,
-    "intervalUnit": "month",
-    "localTime": "11:00"
-  }
-}
-```
-
-An edit request uses the same fields optionally, plus `expectedScheduleVersion`.
-The API increments `ScheduleVersion` for every edit/cancellation so already queued
-old-version reminder jobs are skipped by the Worker.
-
-
-## Business event integration
-
-The tenant application should publish domain events to the internal
-`POST /api/reminder-events` endpoint after the business transaction commits. The
-event endpoint resolves the tenant database through MasterRepair and reads enabled
-`dbo.ReminderEventRules` for the supplied event type. Each matching rule creates a
-tenant-local `dbo.ReminderSchedules` row; the existing Worker sync service projects
-that row to central TaskFlow, where the Reminder Scheduler materializes its due job.
-
-The tenant migration `database/tenant/003_reminder_event_rules.sql` creates:
-- `ReminderEventRules`: event-to-reminder mapping, delay, timezone, SMS templates,
-  optional recurrence and local delivery time.
-- `ReminderEventInbox`: unique EventId inbox to make event retries idempotent.
-
-Template placeholders use `{{key}}` syntax and are resolved from the event's
-string-valued `data` object plus `eventId`, `eventType`, `sourceEntity`,
-`sourceEntityId`, and `occurredAtUtc`. Unknown placeholders reject the event.
-An example rule for a repair completion event can use EventType=`RepairCompleted`,
-DelayMinutes=4320, MobileTemplate=`{{customerMobile}}`, and a MessageTemplate
-containing `{{customerName}}` / `{{repairOrderNumber}}`.
-
-Example event payload:
-
-```json
-{
-  "tenantId": 123,
-  "eventId": "5b2f4e2a-8f6b-4a1a-9a3b-2c9b0d4f2d10",
-  "eventType": "RepairCompleted",
-  "sourceEntity": "RepairOrder",
-  "sourceEntityId": "9876",
-  "occurredAtUtc": "2026-11-06T10:30:00.000Z",
-  "data": {
-    "customerMobile": "09120000000",
-    "customerName": "Customer",
-    "repairOrderNumber": "R-2026-00987"
-  }
-}
-```
-
-The business app must generate a stable EventId and persist/retry delivery (ideally
-using its own transactional outbox) so a network timeout can be retried safely.
-Do not call this endpoint before the repair-completion transaction commits. A duplicate
-EventId returns the previous outcome and does not create another reminder. Rules are
-tenant-specific configuration and must be inserted/managed in each tenant database.
