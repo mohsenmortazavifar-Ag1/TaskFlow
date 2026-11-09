@@ -7,7 +7,7 @@
 
   Default policy: one follow-up reminder 3 days after repair completion.
   Adjust TimeZoneId and MessageTemplate to the tenant's business policy before rollout.
-  ProviderCode is NULL intentionally: the Worker resolves the provider from TenantSmsSettings.
+  This Worker release uses ParsGreen as the configured provider; each tenant supplies its sender number in TenantSmsSettings.
 */
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
@@ -44,7 +44,7 @@ BEGIN TRY
             TimeZoneId = @TimeZoneId,
             MobileTemplate = @MobileTemplate,
             MessageTemplate = @MessageTemplate,
-            ProviderCode = NULL,
+            ProviderCode = N'ParsGreen',
             RecurrenceIntervalValue = NULL,
             RecurrenceIntervalUnit = NULL,
             LocalTime = NULL,
@@ -65,7 +65,7 @@ BEGIN TRY
         VALUES
         (
             @EventType, @ReminderType, @SourceEntity, @DelayMinutes, @TimeZoneId,
-            @MobileTemplate, @MessageTemplate, NULL,
+            @MobileTemplate, @MessageTemplate, N'ParsGreen',
             NULL, NULL, NULL, 1
         );
     END;
