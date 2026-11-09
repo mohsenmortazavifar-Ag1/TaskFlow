@@ -113,3 +113,14 @@ dotnet restore
 dotnet build -c Release
 dotnet run
 ```
+
+
+## ParsGreen SMS provider
+
+The Worker adapter is integrated with the ParsGreen Apiv2 `/Apiv2/Message/SendSms` contract used by the Repair application:
+- `SmsGateway__BaseUrl=https://sms.parsgreen.ir/`
+- `SmsGateway__SendPath=Apiv2/Message/SendSms`
+- `SmsGateway__ApiKey`: ParsGreen API key, injected as a secret
+- `SmsGateway__TimeoutSeconds=20`
+
+The Worker sends `SmsBody`, `Mobiles` (array), and `SmsNumber`; the sender number is read per tenant from `dbo.TenantSmsSettings`. The provider response must contain `R_Success=true`; `DataList[0].MessageId` is saved as the provider message ID. ParsGreen's adapter currently does not establish provider-side exactly-once semantics; an ambiguous network timeout can result in a retry after provider acceptance. Validate provider retry/idempotency behavior before production.
