@@ -17,7 +17,7 @@
 - `TenantPasswordEncryption__KeyBase64`: کلید واقعی سازگار با رمزنگاری رمز Tenantها
 - `Worker__WorkerId`: شناسه این Process
 - `Worker__MaxConcurrency`: سقف کلی Jobهای هم‌زمان
-- `SmsGateway__BaseUrl`, `SmsGateway__SendPath`, `SmsGateway__ApiKey`: اتصال Provider پیامک
+- `SmsGateway__BaseUrl=https://sms.parsgreen.ir/`, `SmsGateway__SendPath=Apiv2/Message/SendSms`, `SmsGateway__ApiKey`: اتصال ParsGreen (کلید فقط در Secret Store/Environment)
 - `TaskFlowApi__BaseUrl`: آدرس پایه Next.js TaskFlow
 - `TaskFlowApi__ReminderEventsPath=/api/reminder-events`
 - `TaskFlowApi__ApiKey`: همان کلید سروری که TaskFlow API در `TASKFLOW_API_KEY` می‌پذیرد
@@ -37,7 +37,7 @@
 Outbox Dispatcher در همان Worker Process اجرا می‌شود. از MasterRepair، جدول `dbo.TenantDatabases` را می‌خواند و با `ServerName`, `DatabaseName`, `SqlLoginName`, `SqlPasswordEncrypted` به دیتابیس عملیاتی Tenant متصل می‌شود. ستون `ConnectionStringEncrypted` استفاده نمی‌شود.
 
 تنظیمات:
-- `Outbox__Enabled=true`
+- `Outbox__Enabled=false` در مرحله آماده‌سازی؛ فقط بعد از تکمیل preflight آن را به `true` تغییر دهید.
 - `Outbox__PollingIntervalSeconds=5`
 - `Outbox__BatchSizePerTenant=10`
 - `Outbox__MaxTenantConcurrency=2`
@@ -54,14 +54,44 @@ Handler با نام `ProcessReminderEvent` رویدادهای دامنه را ا
 - هر پاسخ 2xx از جمله پاسخ duplicate را موفق تلقی می‌کند.
 - timeout و پاسخ غیر 2xx را به Queue برمی‌گرداند تا Job طبق سیاست Retry دوباره اجرا شود.
 
-نمونه تنظیم Environment:
+### تنظیم روی Windows Service
+
+برای سرویس ویندوز از متغیرهای Machine استفاده کنید؛ متغیرهای `$env:` در PowerShell فقط به همان Process و فرزندان آن محدود هستند. دستورات زیر را در PowerShell با دسترسی Administrator اجرا کنید و مقادیر واقعی را از محیط استقرار دریافت کنید:
+
 ```powershell
-$env:Outbox__Enabled = "true"
-$env:TaskFlowApi__BaseUrl = "https://taskflow.example.com"
-$env:TaskFlowApi__ApiKey = "<secret>"
-$env:TenantRegistry__ConnectionString = "<MasterRepair read-only connection>"
-$env:TenantPasswordEncryption__KeyBase64 = "<base64 key>"
+[Environment]::SetEnvironmentVariable("TaskFlowApi__BaseUrl", "https://YOUR-TASKFLOW-HOST", "Machine")
+[Environment]::SetEnvironmentVariable("TaskFlowApi__ReminderEventsPath", "/api/reminder-events", "Machine")
+[Environment]::SetEnvironmentVariable("TaskFlowApi__TimeoutSeconds", "20", "Machine")
+[Environment]::SetEnvironmentVariable("SmsGateway__BaseUrl", "https://sms.parsgreen.ir/", "Machine")
+[Environment]::SetEnvironmentVariable("SmsGateway__SendPath", "Apiv2/Message/SendSms", "Machine")
+[Environment]::SetEnvironmentVariable("SmsGateway__TimeoutSeconds", "20", "Machine")
+
+# API key باید دقیقاً با TASKFLOW_API_KEY در محیط Next.js TaskFlow یکسان باشد.
+# مقدار را در Git، appsettings.json یا command history قرار ندهید.
+$secureKey = Read-Host "Enter the TaskFlow TASKFLOW_API_KEY" -AsSecureString
+$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
+try {
+    $plainKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+    [Environment]::SetEnvironmentVariable("TaskFlowApi__ApiKey", $plainKey, "Machine")
+}
+finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+    $plainKey = $null
+}
+
+# ابتدا false بماند. پس از تأیید API، DBها، Rule و تنظیمات Tenant:
+[Environment]::SetEnvironmentVariable("Outbox__Enabled", "false", "Machine")
 ```
+
+همچنین `TASKFLOW_API_KEY` باید در Secret Store/Environment خود Next.js TaskFlow تنظیم شده باشد. مقدار Worker و Web باید دقیقاً یکسان باشد. بعد از تنظیم متغیرهای Machine، سرویس Worker را Restart کنید تا Environment جدید را دریافت کند.
+
+برای فعال‌سازی Outbox فقط پس از preflight:
+```powershell
+[Environment]::SetEnvironmentVariable("Outbox__Enabled", "true", "Machine")
+Restart-Service -Name TaskFlowWorker
+```
+
+اتصال‌های `TenantRegistry__ConnectionString` و `TenantPasswordEncryption__KeyBase64` نیز باید از Secret Store یا Environment امن Worker تأمین شوند؛ مقادیر واقعی را در مخزن ثبت نکنید.
 
 در Repair، رویداد `RepairCompleted` در همان تراکنش تغییر وضعیت به `Repaired` در `dbo.OutboxMessages` ثبت می‌شود. Worker آن را به Job مرکزی `ProcessReminderEvent` تبدیل می‌کند. API رویداد در Tenant DB، `ReminderEventInbox` و `ReminderSchedules` را به‌صورت idempotent ثبت می‌کند؛ سرویس Tenant Reminder Sync سپس Schedule را به دیتابیس مرکزی منتقل می‌کند.
 
@@ -69,14 +99,16 @@ $env:TenantPasswordEncryption__KeyBase64 = "<base64 key>"
 1. `database/tenant/001_outbox_schema.sql`
 2. `database/tenant/002_reminder_schedules.sql`
 3. `database/tenant/003_reminder_event_rules.sql`
+4. `database/tenant/004_seed_repair_completed_rule.sql`
 
-همچنین باید برای `EventType=RepairCompleted` یک Rule فعال در `dbo.ReminderEventRules` همان Tenant وجود داشته باشد. Placeholderهای قابل استفاده در این event عبارت‌اند از `{{customerMobile}}`, `{{customerName}}`, `{{repairOrderNumber}}`.
+پس از Migrationها، اسکریپت `004_seed_repair_completed_rule.sql` را روی هر Tenant DB اجرا کنید. این اسکریپت Rule یکتای `RepairCompletedFollowUp` را با تأخیر پیش‌فرض 4320 دقیقه (سه روز)، TimeZone پیش‌فرض `Asia/Tehran` و ارسال یک‌باره ایجاد یا به‌روزرسانی می‌کند. TimeZone و متن پیام را قبل از اجرا با سیاست واقعی هر کسب‌وکار تطبیق دهید. Placeholderهای قابل استفاده در این event عبارت‌اند از `{{customerMobile}}`, `{{customerName}}`, `{{repairOrderNumber}}`.
 
 ## محدودیت‌ها و راه‌اندازی
 - Outbox انتقال at-least-once با ثبت مرکزی idempotent فراهم می‌کند؛ ارسال SMS به Provider دقیقاً یک‌بار تضمین نمی‌شود.
 - API Key یک credential داخلی مشترک است و باید فقط به Worker مورد اعتماد داده شود؛ هرگز در Frontend قرار نگیرد.
-- رمزنگاری MasterRepair باید با decryptor فعلی AES-256-GCM v1 سازگار باشد. این سازگاری باید قبل از فعال‌سازی در محیط واقعی تست شود.
-- SQL Server integration tests و build باید قبل از Production اجرا شوند.
+- رمزنگاری MasterRepair باید با decryptor فعلی AES-256-GCM v1 سازگار باشد و اتصال به هر Tenant DB باید با credential رمزگشایی‌شده تأیید شود.
+- قبل از Production، SQL Server integration tests، Build و تست End-to-End اجرا شوند.
+- برای ارسال واقعی SMS، `TenantSmsSettings.IsEnabled=1` و تنظیمات Provider معتبر برای Tenant آزمایشی لازم است؛ از شماره آزمایشی مجاز استفاده کنید.
 
 اجرا از پوشه `worker/TaskFlow.Worker`:
 ```powershell
@@ -84,3 +116,16 @@ dotnet restore
 dotnet build -c Release
 dotnet run
 ```
+
+
+## ParsGreen SMS provider
+
+The Worker adapter is integrated with the ParsGreen Apiv2 `/Apiv2/Message/SendSms` contract used by the Repair application:
+- `SmsGateway__BaseUrl=https://sms.parsgreen.ir/`
+- `SmsGateway__SendPath=Apiv2/Message/SendSms`
+- `SmsGateway__ApiKey`: ParsGreen API key, injected as a secret
+- `SmsGateway__TimeoutSeconds=20`
+
+The Worker sends `SmsBody`, `Mobiles` (array), and `SmsNumber`, using the ParsGreen `Authorization: basic apikey:<key>` header; the sender number is read per tenant from `dbo.TenantSmsSettings`. The `RepairCompleted` seed records `ProviderCode=ParsGreen`; this Worker version uses a single configured ParsGreen gateway for all tenants, not provider-specific routing. The provider response must contain `R_Success=true` and `SuccessCount > 0`; `DataList[0].MessageId` is saved as the provider message ID. The Worker API key uses `SmsGateway__ApiKey` and is separate from `TaskFlowApi__ApiKey`. ParsGreen's adapter currently does not establish provider-side exactly-once semantics; an ambiguous network timeout can result in a retry after provider acceptance. Validate provider retry/idempotency behavior before production.
+
+برای کلید ParsGreen نیز `SmsGateway__ApiKey` را از Secret Store امن به Worker تزریق کنید. شماره فرستنده در هر Tenant باید در `dbo.TenantSmsSettings.SenderNumber` تنظیم و `IsEnabled=1` باشد. کلید ParsGreen و کلید `TASKFLOW_API_KEY` دو Secret متفاوت با کاربرد متفاوت هستند.
