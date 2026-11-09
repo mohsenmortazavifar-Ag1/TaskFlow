@@ -17,7 +17,7 @@
 - `TenantPasswordEncryption__KeyBase64`: کلید واقعی سازگار با رمزنگاری رمز Tenantها
 - `Worker__WorkerId`: شناسه این Process
 - `Worker__MaxConcurrency`: سقف کلی Jobهای هم‌زمان
-- `SmsGateway__BaseUrl`, `SmsGateway__SendPath`, `SmsGateway__ApiKey`: اتصال Provider پیامک
+- `SmsGateway__BaseUrl=https://sms.parsgreen.ir/`, `SmsGateway__SendPath=Apiv2/Message/SendSms`, `SmsGateway__ApiKey`: اتصال ParsGreen (کلید فقط در Secret Store/Environment)
 - `TaskFlowApi__BaseUrl`: آدرس پایه Next.js TaskFlow
 - `TaskFlowApi__ReminderEventsPath=/api/reminder-events`
 - `TaskFlowApi__ApiKey`: همان کلید سروری که TaskFlow API در `TASKFLOW_API_KEY` می‌پذیرد
@@ -62,6 +62,9 @@ Handler با نام `ProcessReminderEvent` رویدادهای دامنه را ا
 [Environment]::SetEnvironmentVariable("TaskFlowApi__BaseUrl", "https://YOUR-TASKFLOW-HOST", "Machine")
 [Environment]::SetEnvironmentVariable("TaskFlowApi__ReminderEventsPath", "/api/reminder-events", "Machine")
 [Environment]::SetEnvironmentVariable("TaskFlowApi__TimeoutSeconds", "20", "Machine")
+[Environment]::SetEnvironmentVariable("SmsGateway__BaseUrl", "https://sms.parsgreen.ir/", "Machine")
+[Environment]::SetEnvironmentVariable("SmsGateway__SendPath", "Apiv2/Message/SendSms", "Machine")
+[Environment]::SetEnvironmentVariable("SmsGateway__TimeoutSeconds", "20", "Machine")
 
 # API key باید دقیقاً با TASKFLOW_API_KEY در محیط Next.js TaskFlow یکسان باشد.
 # مقدار را در Git، appsettings.json یا command history قرار ندهید.
@@ -124,3 +127,5 @@ The Worker adapter is integrated with the ParsGreen Apiv2 `/Apiv2/Message/SendSm
 - `SmsGateway__TimeoutSeconds=20`
 
 The Worker sends `SmsBody`, `Mobiles` (array), and `SmsNumber`; the sender number is read per tenant from `dbo.TenantSmsSettings`. The provider response must contain `R_Success=true`; `DataList[0].MessageId` is saved as the provider message ID. ParsGreen's adapter currently does not establish provider-side exactly-once semantics; an ambiguous network timeout can result in a retry after provider acceptance. Validate provider retry/idempotency behavior before production.
+
+برای کلید ParsGreen نیز `SmsGateway__ApiKey` را از Secret Store امن به Worker تزریق کنید. شماره فرستنده در هر Tenant باید در `dbo.TenantSmsSettings.SenderNumber` تنظیم و `IsEnabled=1` باشد. کلید ParsGreen و کلید `TASKFLOW_API_KEY` دو Secret متفاوت با کاربرد متفاوت هستند.
