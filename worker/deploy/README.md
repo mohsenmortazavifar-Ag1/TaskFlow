@@ -2,6 +2,17 @@
 
 The Worker is one .NET process. Windows is the current deployment target; the Linux unit is included for a future deployment using the same application.
 
+## Local development
+
+For the current local TaskFlow web instance on port 3020, configure the Worker with:
+
+```powershell
+$env:TaskFlowApi__BaseUrl = "http://localhost:3020"
+$env:TaskFlowApi__ReminderEventsPath = "/api/reminder-events"
+```
+
+`localhost` always means the machine/network namespace where the Worker process runs. This address works only when the Next.js TaskFlow server is reachable from that same environment on port 3020. If the Worker runs in Docker, another VM, or another server, use the host-reachable service name/IP instead. Keep `Outbox__Enabled=false` until the SQL and authenticated API preflight is complete.
+
 ## Windows Server
 
 ### Publish
@@ -20,7 +31,7 @@ Open elevated PowerShell and configure machine-level settings before starting th
 [Environment]::SetEnvironmentVariable("Worker__PollingIntervalMilliseconds", "2000", "Machine")
 [Environment]::SetEnvironmentVariable("SmsGateway__BaseUrl", "https://sms.parsgreen.ir/", "Machine")
 [Environment]::SetEnvironmentVariable("SmsGateway__SendPath", "Apiv2/Message/SendSms", "Machine")
-[Environment]::SetEnvironmentVariable("TaskFlowApi__BaseUrl", "https://YOUR-TASKFLOW-HOST", "Machine")
+[Environment]::SetEnvironmentVariable("TaskFlowApi__BaseUrl", "http://localhost:3020", "Machine")
 [Environment]::SetEnvironmentVariable("TaskFlowApi__ReminderEventsPath", "/api/reminder-events", "Machine")
 [Environment]::SetEnvironmentVariable("TaskFlowApi__TimeoutSeconds", "20", "Machine")
 [Environment]::SetEnvironmentVariable("Outbox__Enabled", "false", "Machine")
