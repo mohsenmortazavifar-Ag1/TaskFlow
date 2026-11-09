@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using Microsoft.Extensions.Options;
 using TaskFlow.Worker.Configuration;
 using TaskFlow.Worker.Data;
@@ -35,8 +34,6 @@ builder.Services.AddHttpClient<ISmsGateway, HttpSmsGateway>((sp, client) =>
     if (Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var baseUri))
         client.BaseAddress = baseUri;
     client.Timeout = TimeSpan.FromSeconds(Math.Clamp(options.TimeoutSeconds, 5, 120));
-    if (!string.IsNullOrWhiteSpace(options.ApiKey))
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
 });
 builder.Services.AddHttpClient("TaskFlowReminderEvents", (sp, client) =>
 {
