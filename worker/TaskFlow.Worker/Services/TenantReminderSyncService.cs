@@ -59,6 +59,9 @@ public sealed class TenantReminderSyncService(
         }
     }
 
+
+
+
     private async Task SyncAllTenantsAsync(CancellationToken ct)
     {
         var tenants = await registry.GetActiveDatabasesAsync(ct);
@@ -87,8 +90,16 @@ public sealed class TenantReminderSyncService(
         }
     }
 
+
+
+
+
+
+
     private async Task<int> SyncTenantAsync(TenantDatabase tenant, CancellationToken ct)
     {
+
+
         await using var source = await tenantConnections.OpenAsync(tenant, ct);
         var lastSyncedAt = await ReadWatermarkAsync(tenant.TenantDatabaseId, ct);
         var schedules = new List<TenantReminderSchedule>();
@@ -206,6 +217,14 @@ public sealed class TenantReminderSyncService(
             throw;
         }
     }
+
+
+
+
+
+
+
+
 
     private async Task<DateTime?> ReadWatermarkAsync(long tenantDatabaseId, CancellationToken ct)
     {

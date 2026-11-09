@@ -10,6 +10,7 @@ public sealed class TenantRegistryRepository(IOptions<TenantRegistryOptions> opt
     public async Task<IReadOnlyList<TenantDatabase>> GetActiveDatabasesAsync(CancellationToken ct)
     {
         var cs = options.Value.ConnectionString;
+
         if (string.IsNullOrWhiteSpace(cs))
             throw new InvalidOperationException("TenantRegistry:ConnectionString is required.");
 

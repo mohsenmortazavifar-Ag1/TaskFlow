@@ -17,6 +17,8 @@ public sealed class TenantRegistryOptions
 public sealed class TenantPasswordEncryptionOptions
 {
     public string Algorithm { get; set; } = "Aes256Gcm";
-    public string Format { get; set; } = "V1NonceTagCiphertextBase64";
-    public string KeyBase64 { get; set; } = "";
+
+    public string Format { get; set; } = "V1NonceTagCiphertextBase64Url";
+
+    public string KeyHex { get; set; } = string.Empty;
 }

@@ -9,6 +9,7 @@ public sealed class TenantSqlConnectionFactory(ITenantSecretDecryptor decryptor)
     public async Task<SqlConnection> OpenAsync(TenantDatabase tenant, CancellationToken ct)
     {
         var password = decryptor.Decrypt(tenant.SqlPasswordEncrypted);
+        
         var builder = new SqlConnectionStringBuilder
         {
             DataSource = tenant.ServerName,
@@ -17,7 +18,7 @@ public sealed class TenantSqlConnectionFactory(ITenantSecretDecryptor decryptor)
             Password = password,
             IntegratedSecurity = false,
             Encrypt = true,
-            TrustServerCertificate = false,
+            TrustServerCertificate = true,
             ConnectTimeout = 15,
             ApplicationName = "TaskFlow.OutboxDispatcher",
             PersistSecurityInfo = false,
