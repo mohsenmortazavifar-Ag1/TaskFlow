@@ -23,6 +23,7 @@ public sealed class HttpSmsGateway(HttpClient http, IOptions<SmsGatewayOptions> 
     private sealed record ParsGreenResponse(
         bool R_Success,
         int R_Code,
+        int SuccessCount,
         string? R_Message,
         string? R_Error,
         List<ParsGreenMessageResult>? DataList);
@@ -61,6 +62,7 @@ public sealed class HttpSmsGateway(HttpClient http, IOptions<SmsGatewayOptions> 
         };
 
         // Retain the local correlation key for diagnostics; ParsGreen may ignore this header.
+        request.Headers.TryAddWithoutValidation("Authorization", $"basic apikey:{config.ApiKey}");
         request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
 
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -92,6 +94,9 @@ public sealed class HttpSmsGateway(HttpClient http, IOptions<SmsGatewayOptions> 
             throw new InvalidOperationException(
                 $"ParsGreen rejected SMS (code {result.R_Code}): {Trim(providerError ?? "Unknown provider error")}");
         }
+
+        if (result.SuccessCount < 1)
+            throw new InvalidOperationException($"ParsGreen returned R_Success=true but SuccessCount={result.SuccessCount}.");
 
         var providerMessageId = result.DataList?.FirstOrDefault()?.MessageId;
         return new SmsSendResult(providerMessageId);
