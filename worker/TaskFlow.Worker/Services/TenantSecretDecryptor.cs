@@ -40,17 +40,39 @@ public sealed class TenantSecretDecryptor(
                 "Unsupported encryption algorithm.");
         }
 
-        var keyHex = config.KeyHex;
+        byte[] key;
 
-        if (string.IsNullOrEmpty(keyHex) ||
-            keyHex.Length != 64 ||
-            !keyHex.All(Uri.IsHexDigit))
+        if (!string.IsNullOrWhiteSpace(config.KeyBase64))
+        {
+            try
+            {
+                key = Convert.FromBase64String(config.KeyBase64.Trim());
+            }
+            catch (FormatException ex)
+            {
+                throw new InvalidOperationException(
+                    "TenantPasswordEncryption:KeyBase64 must be valid standard Base64.", ex);
+            }
+
+            if (key.Length != KeyLength)
+            {
+                CryptographicOperations.ZeroMemory(key);
+                throw new InvalidOperationException(
+                    "TenantPasswordEncryption:KeyBase64 must decode to exactly 32 bytes.");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(config.KeyHex) &&
+                 config.KeyHex.Length == 64 &&
+                 config.KeyHex.All(Uri.IsHexDigit))
+        {
+            // Backward compatibility only. Prefer KeyBase64 to match the web application.
+            key = Convert.FromHexString(config.KeyHex);
+        }
+        else
         {
             throw new InvalidOperationException(
-                "Encryption key must contain exactly 64 hexadecimal characters.");
+                "Configure TenantPasswordEncryption:KeyBase64 with the 32-byte MasterRepair key.");
         }
-
-        var key = Convert.FromHexString(keyHex);
 
         try
         {
