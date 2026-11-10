@@ -20,5 +20,9 @@ public sealed class TenantPasswordEncryptionOptions
 
     public string Format { get; set; } = "V1NonceTagCiphertextBase64Url";
 
+    // Preferred format shared with the TaskFlow web app: 32-byte standard Base64.
+    public string KeyBase64 { get; set; } = string.Empty;
+
+    // Temporary backward compatibility for existing deployments; migrate to KeyBase64.
     public string KeyHex { get; set; } = string.Empty;
 }
