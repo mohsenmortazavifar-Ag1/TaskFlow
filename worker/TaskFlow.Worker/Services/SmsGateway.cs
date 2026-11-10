@@ -28,7 +28,13 @@ public sealed class HttpSmsGateway(HttpClient http, IOptions<SmsGatewayOptions> 
         string? R_Error,
         List<ParsGreenMessageResult>? DataList);
 
-    private sealed record ParsGreenMessageResult(string? MessageId, string? Mobile, decimal? Cost);
+    // ParsGreen integrations expose the provider reference under MessageId or ReqID,
+    // depending on the API response version.
+    private sealed record ParsGreenMessageResult(
+        string? MessageId,
+        string? ReqID,
+        string? Mobile,
+        decimal? Cost);
 
     public async Task<SmsSendResult> SendAsync(
         SmsMessage message,
@@ -36,10 +42,18 @@ public sealed class HttpSmsGateway(HttpClient http, IOptions<SmsGatewayOptions> 
         CancellationToken cancellationToken)
     {
         var config = options.Value;
+
+        if (!string.Equals(message.ProviderCode, "ParsGreen", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"Unsupported SMS provider '{message.ProviderCode ?? "(null)"}' for tenant {message.TenantId}.");
+
         if (string.IsNullOrWhiteSpace(config.BaseUrl))
             throw new InvalidOperationException("SmsGateway:BaseUrl is not configured.");
         if (string.IsNullOrWhiteSpace(config.ApiKey))
             throw new InvalidOperationException("SmsGateway:ApiKey is not configured.");
+        if (!Uri.TryCreate(config.BaseUrl, UriKind.Absolute, out var baseUri) ||
+            (baseUri.Scheme != Uri.UriSchemeHttps && !baseUri.IsLoopback))
+            throw new InvalidOperationException("SmsGateway:BaseUrl must be a valid HTTPS URL (HTTP is allowed only for loopback development).");
         if (string.IsNullOrWhiteSpace(message.SenderNumber))
             throw new InvalidOperationException($"No sender number is configured for tenant {message.TenantId}.");
         if (string.IsNullOrWhiteSpace(message.Mobile) || message.Mobile.Length > 20)
@@ -61,12 +75,17 @@ public sealed class HttpSmsGateway(HttpClient http, IOptions<SmsGatewayOptions> 
             })
         };
 
-        // Retain the local correlation key for diagnostics; ParsGreen may ignore this header.
+        // ParsGreen Apiv2 expects the API key in its documented authorization format.
         request.Headers.TryAddWithoutValidation("Authorization", $"basic apikey:{config.ApiKey}");
-        request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
 
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        // Correlation only: this header is not a provider-side idempotency guarantee.
+        if (!string.IsNullOrWhiteSpace(idempotencyKey))
+            request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
+
+        using var response = await http.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException(
                 $"ParsGreen returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}): {Trim(body)}",
@@ -96,9 +115,11 @@ public sealed class HttpSmsGateway(HttpClient http, IOptions<SmsGatewayOptions> 
         }
 
         if (result.SuccessCount < 1)
-            throw new InvalidOperationException($"ParsGreen returned R_Success=true but SuccessCount={result.SuccessCount}.");
+            throw new InvalidOperationException(
+                $"ParsGreen returned R_Success=true but SuccessCount={result.SuccessCount}.");
 
-        var providerMessageId = result.DataList?.FirstOrDefault()?.MessageId;
+        var firstResult = result.DataList?.FirstOrDefault();
+        var providerMessageId = firstResult?.MessageId ?? firstResult?.ReqID;
         return new SmsSendResult(providerMessageId);
     }
 
