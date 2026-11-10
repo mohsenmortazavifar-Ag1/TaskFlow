@@ -23,18 +23,16 @@ public sealed class HttpSmsGateway(HttpClient http, IOptions<SmsGatewayOptions> 
     private sealed record ParsGreenResponse(
         bool R_Success,
         int R_Code,
-        int SuccessCount,
+        ParsGreenData? Data,
         string? R_Message,
-        string? R_Error,
-        List<ParsGreenMessageResult>? DataList);
+        string? R_Error);
 
-    // ParsGreen integrations expose the provider reference under MessageId or ReqID,
-    // depending on the API response version.
-    private sealed record ParsGreenMessageResult(
-        string? MessageId,
-        string? ReqID,
+    // The SendSms contract returns delivery submission details inside the Data object.
+    private sealed record ParsGreenData(
+        int SuccessCount,
+        int SendStatus,
         string? Mobile,
-        decimal? Cost);
+        string? ReqID);
 
     public async Task<SmsSendResult> SendAsync(
         SmsMessage message,
@@ -75,6 +73,8 @@ public sealed class HttpSmsGateway(HttpClient http, IOptions<SmsGatewayOptions> 
             })
         };
 
+        request.Headers.Accept.ParseAdd("application/json");
+
         // ParsGreen Apiv2 expects the API key in its documented authorization format.
         request.Headers.TryAddWithoutValidation("Authorization", $"basic apikey:{config.ApiKey}");
 
@@ -114,13 +114,14 @@ public sealed class HttpSmsGateway(HttpClient http, IOptions<SmsGatewayOptions> 
                 $"ParsGreen rejected SMS (code {result.R_Code}): {Trim(providerError ?? "Unknown provider error")}");
         }
 
-        if (result.SuccessCount < 1)
-            throw new InvalidOperationException(
-                $"ParsGreen returned R_Success=true but SuccessCount={result.SuccessCount}.");
+        if (result.Data is null)
+            throw new InvalidOperationException("ParsGreen returned R_Success=true without the expected Data object.");
 
-        var firstResult = result.DataList?.FirstOrDefault();
-        var providerMessageId = firstResult?.MessageId ?? firstResult?.ReqID;
-        return new SmsSendResult(providerMessageId);
+        if (result.Data.SuccessCount < 1)
+            throw new InvalidOperationException(
+                $"ParsGreen returned R_Success=true but Data.SuccessCount={result.Data.SuccessCount}.");
+
+        return new SmsSendResult(result.Data.ReqID);
     }
 
     private static string Trim(string value) => value.Length <= 800 ? value : value[..800];
