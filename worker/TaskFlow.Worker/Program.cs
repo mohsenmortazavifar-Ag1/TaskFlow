@@ -16,6 +16,7 @@ else if (OperatingSystem.IsLinux())
 builder.Services.Configure<WorkerOptions>(builder.Configuration.GetSection("Worker"));
 builder.Services.Configure<DatabaseOptions>(builder.Configuration.GetSection("Database"));
 builder.Services.Configure<SmsGatewayOptions>(builder.Configuration.GetSection("SmsGateway"));
+builder.Services.Configure<SmsDeliveryOptions>(builder.Configuration.GetSection("SmsDelivery"));
 builder.Services.Configure<OutboxOptions>(builder.Configuration.GetSection("Outbox"));
 builder.Services.Configure<ReminderOptions>(builder.Configuration.GetSection("Reminder"));
 builder.Services.Configure<TenantRegistryOptions>(builder.Configuration.GetSection("TenantRegistry"));
@@ -45,6 +46,7 @@ builder.Services.AddSingleton<WorkerHeartbeatService>();
 builder.Services.AddHostedService<WorkerHeartbeatService>(sp => sp.GetRequiredService<WorkerHeartbeatService>());
 builder.Services.AddHostedService<QueuePollingWorker>();
 builder.Services.AddHostedService<ExpiredJobRecoveryService>();
+builder.Services.AddHostedService<SmsDeliveryPollingService>();
 
 // Tenant Outbox Dispatcher, Reminder Scheduler and queue consumers share this Worker process.
 builder.Services.AddSingleton<ITenantSecretDecryptor, TenantSecretDecryptor>();

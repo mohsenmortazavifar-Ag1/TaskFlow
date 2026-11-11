@@ -126,6 +126,21 @@ The Worker adapter is integrated with the ParsGreen Apiv2 `/Apiv2/Message/SendSm
 - `SmsGateway__ApiKey`: ParsGreen API key, injected as a secret
 - `SmsGateway__TimeoutSeconds=20`
 
-The Worker sends `SmsBody`, `Mobiles` (array), and `SmsNumber`, using the ParsGreen `Authorization: basic apikey:<key>` header; the sender number is read per tenant from `dbo.TenantSmsSettings`. The `RepairCompleted` seed records `ProviderCode=ParsGreen`; this Worker version uses a single configured ParsGreen gateway for all tenants, not provider-specific routing. The provider response must contain `R_Success=true` and `SuccessCount > 0`; `DataList[0].MessageId` is saved as the provider message ID. The Worker API key uses `SmsGateway__ApiKey` and is separate from `TaskFlowApi__ApiKey`. ParsGreen's adapter currently does not establish provider-side exactly-once semantics; an ambiguous network timeout can result in a retry after provider acceptance. Validate provider retry/idempotency behavior before production.
+The Worker sends `SmsBody`, `Mobiles` (array), and `SmsNumber`, using the ParsGreen `Authorization: basic apikey:<key>` header; the sender number is read per tenant from `dbo.TenantSmsSettings`. The `RepairCompleted` seed records `ProviderCode=ParsGreen`; this Worker version uses a single configured ParsGreen gateway for all tenants, not provider-specific routing. The SendSms response is parsed from top-level `SuccessCount` and `DataList`; `DataList[].ReqID` is saved as `ProviderMessageId`. A successful submission is not the same as delivery. The Worker calls `POST Apiv2/Message/CheckDelivery` with `{ "RecId": "<ReqID>" }`. Based on the observed provider responses, DeliveryStatus 41 is Delivered, 50 is Pending, and 0 is Undelivered; unknown codes are retained without interpretation. Each SMS is checked at most twice. The Worker API key uses `SmsGateway__ApiKey` and is separate from `TaskFlowApi__ApiKey`.
+
+### SMS database migration and state model
+
+Run `database/006_sms_delivery_tracking.sql` once in the central `TaskFlow` database before deploying this Worker version. It adds independent submission and delivery state columns without changing the existing `SmsMessages.Status` (0..6) contract.
+
+- SubmissionState: 0 Pending, 1 Sending, 2 Accepted, 3 ProviderRejected, 4 NeedsReview (provider outcome ambiguous).
+- DeliveryState: 0 NotScheduled, 1 PendingCheck, 2 Delivered, 3 Undelivered, 4 Unconfirmed after two checks, 5 Unknown / not checkable.
+- A durable Pending -> Sending transition is committed before the external SendSms request. Any retry that sees a non-Pending state does not send again.
+- Network/HTTP/invalid-response ambiguity is moved to NeedsReview, never blindly retried. A stale Sending row is also moved to NeedsReview after the configured timeout.
+- Delivery checks are claimed atomically and the count is incremented before the HTTP request. A message can consume no more than two CheckDelivery requests, including failed requests. Default first and second check delays are 120 seconds.
+- DeliveryStatus 50 schedules the second check only when the first check returned 50. DeliveryStatus 0 is recorded as Undelivered and never triggers an automatic resend. After the second pending/failed check, the state becomes Unconfirmed.
+- ParsGreen acceptance without a ReqID is recorded as Accepted but not checkable; it is never resent.
+- Legacy rows matching the previous malformed-success response are migrated to NeedsReview to prevent accidental duplicate sends. Reconcile them manually with ParsGreen before any manual action.
+
+Configuration: `SmsDelivery__Enabled=true`, `SmsDelivery__PollingIntervalSeconds=15`, `SmsDelivery__FirstCheckDelaySeconds=120`, and `SmsDelivery__SubsequentCheckDelaySeconds=120`. The maximum check count is intentionally fixed at two and is not configurable above the provider's documented recommendation.
 
 برای کلید ParsGreen نیز `SmsGateway__ApiKey` را از Secret Store امن به Worker تزریق کنید. شماره فرستنده در هر Tenant باید در `dbo.TenantSmsSettings.SenderNumber` تنظیم و `IsEnabled=1` باشد. کلید ParsGreen و کلید `TASKFLOW_API_KEY` دو Secret متفاوت با کاربرد متفاوت هستند.

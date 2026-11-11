@@ -19,7 +19,8 @@ public sealed class DatabaseOptions
 public sealed class SmsGatewayOptions
 {
     public string BaseUrl { get; set; } = "";
-    public string SendPath { get; set; } = "messages";
+    public string SendPath { get; set; } = "Apiv2/Message/SendSms";
+    public string CheckDeliveryPath { get; set; } = "Apiv2/Message/CheckDelivery";
     public string ApiKey { get; set; } = "";
     public int TimeoutSeconds { get; set; } = 20;
 }
