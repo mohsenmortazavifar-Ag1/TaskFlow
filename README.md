@@ -17,6 +17,7 @@
    - `database/003_seed.sql`
    - `database/004_procedures.sql`
    - `database/005_tenant_reminder_sync.sql`
+   - `database/006_sms_delivery_tracking.sql` (SMS submission and ParsGreen delivery tracking)
 4. اسکریپت‌های `database/tenant` را به ترتیب روی هر دیتابیس عملیاتی Tenant اجرا کنید.
 5. سپس `npm install` و `npm run dev` را اجرا کنید.
 
