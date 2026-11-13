@@ -112,46 +112,58 @@ public sealed class SmsDeliveryPollingService(
 
     private async Task LogDatabaseSessionDiagnosticsAsync(CancellationToken ct)
     {
-        await using var connection = await jobs.OpenConnectionAsync(ct);
-        await using var command = new SqlCommand("""
-            SELECT
-                CAST(@@SPID AS int) AS SessionId,
-                CAST(DB_NAME() AS nvarchar(128)) AS DatabaseName,
-                CAST(session.transaction_isolation_level AS int) AS IsolationLevel,
-                database_info.is_read_committed_snapshot_on AS IsReadCommittedSnapshotOn,
-                CAST(database_info.snapshot_isolation_state_desc AS nvarchar(60)) AS SnapshotIsolationState
-            FROM sys.dm_exec_sessions AS session
-            INNER JOIN sys.databases AS database_info
-                ON database_info.database_id = DB_ID()
-            WHERE session.session_id = @@SPID;
-            """, connection);
-
-        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, ct);
-        if (!await reader.ReadAsync(ct))
+        try
         {
-            logger.LogWarning("Could not read SQL Server session diagnostics for SMS delivery polling.");
-            return;
+            await using var connection = await jobs.OpenConnectionAsync(ct);
+            await using var command = new SqlCommand("""
+                SELECT
+                    CAST(@@SPID AS int) AS SessionId,
+                    CAST(DB_NAME() AS nvarchar(128)) AS DatabaseName,
+                    CAST(session.transaction_isolation_level AS int) AS IsolationLevel,
+                    database_info.is_read_committed_snapshot_on AS IsReadCommittedSnapshotOn,
+                    CAST(database_info.snapshot_isolation_state_desc AS nvarchar(60)) AS SnapshotIsolationState
+                FROM sys.dm_exec_sessions AS session
+                INNER JOIN sys.databases AS database_info
+                    ON database_info.database_id = DB_ID()
+                WHERE session.session_id = @@SPID;
+                """, connection);
+
+            await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, ct);
+            if (!await reader.ReadAsync(ct))
+            {
+                logger.LogWarning("Could not read SQL Server session diagnostics for SMS delivery polling.");
+                return;
+            }
+
+            var sessionId = reader.GetInt32(0);
+            var databaseName = reader.GetString(1);
+            var isolationLevel = reader.GetInt32(2);
+            var isReadCommittedSnapshotOn = reader.GetBoolean(3);
+            var snapshotIsolationState = reader.GetString(4);
+            var isolationName = isolationLevel switch
+            {
+                1 => "READ UNCOMMITTED",
+                2 => "READ COMMITTED",
+                3 => "REPEATABLE READ",
+                4 => "SERIALIZABLE",
+                5 => "SNAPSHOT",
+                _ => $"UNKNOWN ({isolationLevel})"
+            };
+
+            logger.LogInformation(
+                "SMS delivery SQL session diagnostics: SessionId={SessionId}, Database={DatabaseName}, Isolation={IsolationLevel} ({IsolationName}), READ_COMMITTED_SNAPSHOT={ReadCommittedSnapshotOn}, SnapshotIsolationState={SnapshotIsolationState}.",
+                sessionId, databaseName, isolationLevel, isolationName,
+                isReadCommittedSnapshotOn, snapshotIsolationState);
         }
-
-        var sessionId = reader.GetInt32(0);
-        var databaseName = reader.GetString(1);
-        var isolationLevel = reader.GetInt32(2);
-        var isReadCommittedSnapshotOn = reader.GetBoolean(3);
-        var snapshotIsolationState = reader.GetString(4);
-        var isolationName = isolationLevel switch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            1 => "READ UNCOMMITTED",
-            2 => "READ COMMITTED",
-            3 => "REPEATABLE READ",
-            4 => "SERIALIZABLE",
-            5 => "SNAPSHOT",
-            _ => $"UNKNOWN ({isolationLevel})"
-        };
-
-        logger.LogInformation(
-            "SMS delivery SQL session diagnostics: SessionId={SessionId}, Database={DatabaseName}, Isolation={IsolationLevel} ({IsolationName}), READ_COMMITTED_SNAPSHOT={ReadCommittedSnapshotOn}, SnapshotIsolationState={SnapshotIsolationState}.",
-            sessionId, databaseName, isolationLevel, isolationName,
-            isReadCommittedSnapshotOn, snapshotIsolationState);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Diagnostics must never prevent the hosted service from starting.
+            logger.LogWarning(ex, "Could not collect SQL session diagnostics for SMS delivery polling.");
+        }
     }
 
     private async Task<IReadOnlyList<DueSms>> ClaimDueMessagesAsync(CancellationToken ct)
