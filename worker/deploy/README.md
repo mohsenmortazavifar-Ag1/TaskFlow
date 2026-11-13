@@ -2,6 +2,17 @@
 
 The Worker is one .NET process. Windows is the current deployment target; the Linux unit is included for a future deployment using the same application.
 
+## Local development
+
+For the current local TaskFlow web instance on port 3020, configure the Worker with:
+
+```powershell
+$env:TaskFlowApi__BaseUrl = "http://localhost:3020"
+$env:TaskFlowApi__ReminderEventsPath = "/api/reminder-events"
+```
+
+`localhost` always means the machine/network namespace where the Worker process runs. This address works only when the Next.js TaskFlow server is reachable from that same environment on port 3020. If the Worker runs in Docker, another VM, or another server, use the host-reachable service name/IP instead. Keep `Outbox__Enabled=false` until the SQL and authenticated API preflight is complete.
+
 ## Windows Server
 
 ### Publish
@@ -18,8 +29,16 @@ Open elevated PowerShell and configure machine-level settings before starting th
 [Environment]::SetEnvironmentVariable("Worker__WorkerId", "$env:COMPUTERNAME-taskflow-worker", "Machine")
 [Environment]::SetEnvironmentVariable("Worker__MaxConcurrency", "3", "Machine")
 [Environment]::SetEnvironmentVariable("Worker__PollingIntervalMilliseconds", "2000", "Machine")
-[Environment]::SetEnvironmentVariable("SmsGateway__BaseUrl", "https://YOUR-SMS-PROVIDER-API/", "Machine")
-[Environment]::SetEnvironmentVariable("SmsGateway__ApiKey", "REPLACE_ME", "Machine")
+[Environment]::SetEnvironmentVariable("SmsGateway__BaseUrl", "https://sms.parsgreen.ir/", "Machine")
+[Environment]::SetEnvironmentVariable("SmsGateway__SendPath", "Apiv2/Message/SendSms", "Machine")
+[Environment]::SetEnvironmentVariable("TaskFlowApi__BaseUrl", "http://localhost:3020", "Machine")
+[Environment]::SetEnvironmentVariable("TaskFlowApi__ReminderEventsPath", "/api/reminder-events", "Machine")
+[Environment]::SetEnvironmentVariable("TaskFlowApi__TimeoutSeconds", "20", "Machine")
+[Environment]::SetEnvironmentVariable("Outbox__Enabled", "false", "Machine")
+[Environment]::SetEnvironmentVariable("Reminder__Enabled", "true", "Machine")
+[Environment]::SetEnvironmentVariable("Reminder__TenantSyncEnabled", "true", "Machine")
+# Also provide TenantRegistry__ConnectionString and TenantPasswordEncryption__KeyBase64.
+# Inject TaskFlowApi__ApiKey and SmsGateway__ApiKey from the approved secret store.
 ```
 Use a dedicated SQL login with only required permissions; do not use `sa`. The service runs as `NT AUTHORITY\LocalService`. For a remote SQL Server, SQL authentication is the straightforward option unless a domain service identity and integrated authentication are deliberately configured.
 
@@ -77,4 +96,16 @@ Populate `/etc/taskflow/worker.env` with the same double-underscore keys (for ex
 - `Worker__MaxConcurrency` is a hard upper bound, not a throughput guarantee. Start conservatively and load-test before increasing it.
 - Allow the Worker host to connect to SQL Server and make outbound HTTPS calls to the SMS provider.
 - Configure database backups, monitoring, alerting, and provider-side idempotency before production.
-- This deployment package does not make the Worker production-ready. The generic SMS adapter must be integrated with the actual provider, and SQL schema compatibility plus end-to-end retry/recovery behavior must be tested.
+- This deployment package does not make the Worker production-ready. The Worker includes a ParsGreen Apiv2 adapter. Configure the ParsGreen API key in `SmsGateway__ApiKey`; configure a valid sender number and `IsEnabled=1` in each tenant row of `dbo.TenantSmsSettings`. Configure `TaskFlowApi__ApiKey` to exactly match the Next.js server-side `TASKFLOW_API_KEY`. The TaskFlow web host must also have `MASTER_DB_SERVER`, `MASTER_DB_USER`, `MASTER_DB_PASSWORD`, `MASTER_DB_NAME`, and `TENANT_PASSWORD_ENCRYPTION_KEY_BASE64` configured so its event API can resolve/decrypt tenant credentials. Keep all secrets in the approved secret store. SQL schema compatibility plus end-to-end retry/recovery behavior must be tested.
+### Outbox activation gate
+
+Keep `Outbox__Enabled=false` until all of the following are verified:
+1. Central TaskFlow migrations `001` through `005` have been applied.
+2. Tenant migrations `001_outbox_schema.sql`, `002_reminder_schedules.sql`, and `003_reminder_event_rules.sql` have been applied to every in-scope Repair tenant database.
+3. `004_seed_repair_completed_rule.sql` has been applied to the designated test tenant and the returned row is enabled with the expected event/source and delay.
+4. The Worker can connect to MasterRepair, decrypt a test tenant password, and open that tenant database using the configured TLS settings.
+5. The TaskFlow API is reachable over HTTPS and accepts a controlled authenticated test request.
+6. The ParsGreen key is valid and the tenant sender number is enabled; first send only to an explicitly authorized test mobile.
+7. The complete test event is visible in tenant `OutboxMessages`, central `Jobs`, tenant `ReminderEventInbox` and `ReminderSchedules`, central `ReminderSchedules` and `ReminderOccurrences`, then central `SmsMessages` and `SmsLogs`.
+
+Only then set `Outbox__Enabled=true` and restart the Worker. The rule's default delay is three days; use a separate non-production test rule/database for a short delay. Do not shorten the production rule to accelerate testing.

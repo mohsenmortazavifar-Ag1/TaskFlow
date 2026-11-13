@@ -4,34 +4,47 @@
 
 ## فناوری‌ها
 - Next.js App Router و TypeScript
-- React و lucide-react
 - SQL Server از طریق پکیج mssql
 - رابط فارسی و RTL
 - .NET 10 Worker Service مستقل برای اجرای Jobها
 
 ## راه‌اندازی وب
-1. Node.js 20.9+ و SQL Server در دسترس داشته باشید.
-2. فایل .env.example را به .env.local کپی و تنظیمات اتصال را وارد کنید.
-3. اسکریپت‌ها را به ترتیب اجرا کنید:
-   - database/001_create_database.sql (از دیتابیس master)
-   - database/002_schema.sql (در دیتابیس TaskFlow)
-   - database/003_seed.sql
-   - database/004_procedures.sql
-4. سپس npm install و npm run dev را اجرا کنید.
-5. داشبورد در http://localhost:3000 در دسترس است.
+1. Node.js و SQL Server را آماده کنید.
+2. فایل `.env.example` را به `.env.local` کپی و مقادیر را تنظیم کنید.
+3. اسکریپت‌های مرکزی را به ترتیب اجرا کنید:
+   - `database/001_create_database.sql`
+   - `database/002_schema.sql`
+   - `database/003_seed.sql`
+   - `database/004_procedures.sql`
+   - `database/005_tenant_reminder_sync.sql`
+   - `database/006_sms_delivery_tracking.sql` (SMS submission and ParsGreen delivery tracking)
+4. اسکریپت‌های `database/tenant` را به ترتیب روی هر دیتابیس عملیاتی Tenant اجرا کنید.
+5. سپس `npm install` و `npm run dev` را اجرا کنید.
 
-## راه‌اندازی Worker
-راهنمای اجرای Worker در [worker/README.md](worker/README.md) و راهنمای نصب سرویس Windows/Linux در [worker/deploy/README.md](worker/deploy/README.md) قرار دارد. Worker یک Process جدا از Next.js است و به .NET 10 Runtime (در حالت framework-dependent) و دسترسی SQL Server نیاز دارد.
+## Worker
+Worker یک Process مستقل از Next.js است. راهنمای اجرا، تنظیمات، نصب Windows Service/Linux systemd و اتصال به MasterRepair در [worker/README.md](worker/README.md) و [worker/deploy/README.md](worker/deploy/README.md) قرار دارد.
 
-## API
-- GET /api/health اتصال SQL Server را بررسی می‌کند.
-- GET /api/jobs?page=1&pageSize=20 فهرست Jobها را می‌دهد و مانند POST به Header با نام x-taskflow-api-key نیاز دارد.
-- POST /api/jobs برای ثبت Job به Header با نام x-taskflow-api-key نیاز دارد.
+## APIهای داخلی
+- `GET /api/health`: بررسی اتصال SQL Server
+- `GET /api/jobs` و `POST /api/jobs`: مدیریت داخلی Jobها با Header `x-taskflow-api-key`
+- `GET/POST /api/reminders`, `PATCH/DELETE /api/reminders/{id}`: مدیریت تعریف‌های Reminder
+- `POST /api/reminder-events`: دریافت رویدادهای تجاری و تبدیل Ruleهای Tenant به Reminder Schedule
 
-نمونه Body:
-`{"tenantId":125,"queueName":"sms","jobType":"SendSms","payload":{"smsMessageId":98765},"priority":10,"idempotencyKey":"tenant-125-event-unique-id"}`
+APIهای Reminder و رویداد فقط برای Backendهای مورد اعتماد هستند. کلید `TASKFLOW_API_KEY` را هرگز در Frontend یا متغیرهای `NEXT_PUBLIC_*` قرار ندهید. در API رویداد، `tenantDatabaseId` باید همراه `tenantId` ارسال شود تا دیتابیس عملیاتی دقیق از MasterRepair انتخاب شود.
 
-## امنیت و وضعیت پیاده‌سازی
-این نسخه پایه اجرایی است، نه سامانه آماده Production. کلید API فقط در سرویس‌های مورد اعتماد نگهداری شود. TenantId در نسخه نهایی از توکن معتبر سمت سرور استخراج شود.
+## اتصال رویداد تکمیل تعمیر
 
-Outbox Dispatcher، Reminder Scheduler، آداپتور اختصاصی Provider پیامک، احراز هویت مدیران و مدیریت کامل پیامک/صف‌ها هنوز باقی هستند. Worker فعلی چرخه Claim/Handler/Retry/Complete و Heartbeat را فراهم می‌کند؛ محدودیت‌ها در worker/README.md آمده‌اند.
+Repair هنگام تغییر وضعیت سفارش به `Repaired`، رویداد `RepairCompleted` را در جدول `dbo.OutboxMessages` دیتابیس Tenant و در همان تراکنش SQL ثبت می‌کند. TaskFlow Worker این رویداد را Claim کرده و به Job مرکزی `ProcessReminderEvent` تبدیل می‌کند؛ Handler سپس آن را به `POST /api/reminder-events` می‌فرستد.
+
+API با `ReminderEventInbox.EventId` تکرار رویداد را کنترل می‌کند و براساس Ruleهای فعال در `dbo.ReminderEventRules` یک یا چند ردیف در `dbo.ReminderSchedules` می‌سازد. Tenant Reminder Sync این Scheduleها را به دیتابیس مرکزی منتقل می‌کند و Reminder Scheduler اجرای زمان‌بندی‌شده را انجام می‌دهد.
+
+برای راه‌اندازی end-to-end:
+1. Migrationهای Outbox، Reminder Schedule و Reminder Event Rules را روی هر Tenant DB اجرا کنید.
+2. جدول `dbo.ReminderEventRules` را برای `RepairCompleted` با Templateهای متناسب با کسب‌وکار تنظیم کنید.
+3. Worker را با MasterRepair Registry، تنظیمات رمزگشایی رمز Tenantها، `TaskFlowApi__BaseUrl` و `TaskFlowApi__ApiKey` پیکربندی کنید.
+4. `Outbox__Enabled=true` را فقط پس از تست اتصال و رمزنگاری فعال کنید.
+
+Outbox انتقال at-least-once با ثبت مرکزی idempotent فراهم می‌کند؛ تحویل دقیقاً یک‌باره SMS توسط Provider خارجی تضمین نمی‌شود. اجرای SQL Server integration tests و تطبیق رمزنگاری MasterRepair قبل از Production الزامی است.
+
+## وضعیت
+این پروژه هنوز نیازمند تست end-to-end روی SQL Server واقعی، تأیید رمزنگاری MasterRepair و تطبیق قرارداد Provider پیامک است. موفقیت Build به‌تنهایی به معنی تأیید عملکرد Production نیست.

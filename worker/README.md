@@ -1,63 +1,146 @@
 # TaskFlow .NET Worker Host
 
-این پروژه یک Process مستقل برای Claim و اجرای Jobهای دیتابیس TaskFlow است. هدف این مرحله ایجاد چرخه اجرایی پایه است؛ نه ادعای آماده‌بودن برای Production.
+این پروژه یک Process مستقل برای Claim و اجرای Jobهای دیتابیس TaskFlow است.
 
 ## نیازمندی‌ها
 - .NET 10 SDK برای Build/Publish
 - دسترسی شبکه‌ای Worker به SQL Server و دیتابیس TaskFlow
-- دسترسی خروجی HTTPS به SMS Gateway
-- اجرای اسکریپت‌های دیتابیس TaskFlow تا مرحله `004_procedures.sql`
+- دسترسی شبکه‌ای به MasterRepair و دیتابیس‌های عملیاتی Tenantها
+- دسترسی خروجی HTTPS به SMS Gateway و TaskFlow API
 
-## تنظیمات
-تنظیمات را از Environment Variables یا Secret Store تزریق کنید؛ Secret را در appsettings یا Git قرار ندهید.
+## تنظیمات اصلی
 
-متغیرهای اصلی:
-- `Database__ConnectionString`: اتصال BackgroundDB
-- `Worker__WorkerId`: شناسه ثابت و یکتای این Process؛ در صورت خالی بودن، شناسه خودکار ساخته می‌شود.
+تمام Secretها را از Environment Variables یا Secret Store تزریق کنید؛ Secret را در appsettings یا Git قرار ندهید.
+
+- `Database__ConnectionString`: اتصال BackgroundDB مرکزی
+- `TenantRegistry__ConnectionString`: اتصال read-only به MasterRepair
+- `TenantPasswordEncryption__KeyBase64`: کلید واقعی سازگار با رمزنگاری رمز Tenantها
+- `Worker__WorkerId`: شناسه این Process
 - `Worker__MaxConcurrency`: سقف کلی Jobهای هم‌زمان
-- `Worker__PollingIntervalMilliseconds`: فاصله Poll
-- `Worker__RecoveryIntervalSeconds`: فاصله بازیابی Leaseهای منقضی‌شده
-- `SmsGateway__BaseUrl`: آدرس Base سرویس پیامک
-- `SmsGateway__SendPath`: مسیر ارسال
-- `SmsGateway__ApiKey`: کلید API
+- `SmsGateway__BaseUrl=https://sms.parsgreen.ir/`, `SmsGateway__SendPath=Apiv2/Message/SendSms`, `SmsGateway__ApiKey`: اتصال ParsGreen (کلید فقط در Secret Store/Environment)
+- `TaskFlowApi__BaseUrl`: آدرس پایه Next.js TaskFlow
+- `TaskFlowApi__ReminderEventsPath=/api/reminder-events`
+- `TaskFlowApi__ApiKey`: همان کلید سروری که TaskFlow API در `TASKFLOW_API_KEY` می‌پذیرد
+- `TaskFlowApi__TimeoutSeconds=20`
 
 ## رفتار اجرا
 - Queueهای فعال از `dbo.JobQueues` خوانده می‌شوند.
-- محدودیت کلی هم‌زمانی از `Worker:MaxConcurrency` و محدودیت هر صف از `JobQueues.MaxConcurrency` اعمال می‌شود.
-- Job با Stored Procedure `dbo.ClaimJobs` و BatchSize=1 Claim می‌شود.
+- Job با Stored Procedure `dbo.ClaimJobs` Claim می‌شود.
 - Handler با مقدار `JobType` انتخاب می‌شود.
 - موفقیت با `dbo.CompleteJob` و خطا با `dbo.FailJob` ثبت می‌شود.
 - تلاش‌ها در `dbo.JobAttempts` ذخیره می‌شوند.
 - Heartbeat در `dbo.WorkerInstances` ثبت می‌شود.
-- سرویس داخلی Recovery به‌صورت دوره‌ای `dbo.RecoverExpiredJobs` را اجرا می‌کند.
-- در زمان توقف، Job نیمه‌تمام Complete یا Fail نمی‌شود؛ Lease آن منقضی می‌شود و Recovery می‌تواند آن را دوباره Claim کند.
+- Recovery، Jobهای دارای Lease منقضی‌شده را بازیابی می‌کند.
 
-## قرارداد HTTP آداپتور پیامک
-آداپتور فعلی یک قرارداد عمومی نمونه است، نه اتصال تأییدشده به پنل خاص. درخواست POST شامل `mobile`, `message`, `senderNumber`, `tenantId` است و Header با نام `Idempotency-Key` ارسال می‌شود. پاسخ موفق باید JSON با `{"accepted":true,"providerMessageId":"..." }` باشد. قبل از Production باید این Adapter دقیقاً با مستندات Provider واقعی تطبیق داده و تست شود.
+## Tenant Outbox Dispatcher
 
-## اجرا
-از پوشه `worker/TaskFlow.Worker`:
+Outbox Dispatcher در همان Worker Process اجرا می‌شود. از MasterRepair، جدول `dbo.TenantDatabases` را می‌خواند و با `ServerName`, `DatabaseName`, `SqlLoginName`, `SqlPasswordEncrypted` به دیتابیس عملیاتی Tenant متصل می‌شود. ستون `ConnectionStringEncrypted` استفاده نمی‌شود.
+
+تنظیمات:
+- `Outbox__Enabled=false` در مرحله آماده‌سازی؛ فقط بعد از تکمیل preflight آن را به `true` تغییر دهید.
+- `Outbox__PollingIntervalSeconds=5`
+- `Outbox__BatchSizePerTenant=10`
+- `Outbox__MaxTenantConcurrency=2`
+- `Outbox__LeaseSeconds=300`
+
+پیش از فعال‌سازی، `database/tenant/001_outbox_schema.sql` را روی تمام Tenant DBها اجرا کنید. Dispatcher رکوردها را با Lease اتمیک Claim می‌کند و با `EventId` به‌عنوان idempotency key در صف مرکزی ثبت می‌کند. خطاهای موقت با backoff retry می‌شوند و بعد از اتمام تلاش‌ها به Dead می‌روند.
+
+## Business Event -> Reminder
+
+Handler با نام `ProcessReminderEvent` رویدادهای دامنه را از صف مرکزی به `POST /api/reminder-events` می‌فرستد. این Handler:
+- TenantId داخل payload را با TenantId خود Job مقایسه می‌کند.
+- فقط HTTPS را در محیط غیرمحلی قبول می‌کند.
+- API key را فقط در Header `x-taskflow-api-key` می‌فرستد.
+- هر پاسخ 2xx از جمله پاسخ duplicate را موفق تلقی می‌کند.
+- timeout و پاسخ غیر 2xx را به Queue برمی‌گرداند تا Job طبق سیاست Retry دوباره اجرا شود.
+
+### تنظیم روی Windows Service
+
+برای سرویس ویندوز از متغیرهای Machine استفاده کنید؛ متغیرهای `$env:` در PowerShell فقط به همان Process و فرزندان آن محدود هستند. دستورات زیر را در PowerShell با دسترسی Administrator اجرا کنید و مقادیر واقعی را از محیط استقرار دریافت کنید:
+
+```powershell
+[Environment]::SetEnvironmentVariable("TaskFlowApi__BaseUrl", "https://YOUR-TASKFLOW-HOST", "Machine")
+[Environment]::SetEnvironmentVariable("TaskFlowApi__ReminderEventsPath", "/api/reminder-events", "Machine")
+[Environment]::SetEnvironmentVariable("TaskFlowApi__TimeoutSeconds", "20", "Machine")
+[Environment]::SetEnvironmentVariable("SmsGateway__BaseUrl", "https://sms.parsgreen.ir/", "Machine")
+[Environment]::SetEnvironmentVariable("SmsGateway__SendPath", "Apiv2/Message/SendSms", "Machine")
+[Environment]::SetEnvironmentVariable("SmsGateway__TimeoutSeconds", "20", "Machine")
+
+# API key باید دقیقاً با TASKFLOW_API_KEY در محیط Next.js TaskFlow یکسان باشد.
+# مقدار را در Git، appsettings.json یا command history قرار ندهید.
+$secureKey = Read-Host "Enter the TaskFlow TASKFLOW_API_KEY" -AsSecureString
+$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
+try {
+    $plainKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+    [Environment]::SetEnvironmentVariable("TaskFlowApi__ApiKey", $plainKey, "Machine")
+}
+finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+    $plainKey = $null
+}
+
+# ابتدا false بماند. پس از تأیید API، DBها، Rule و تنظیمات Tenant:
+[Environment]::SetEnvironmentVariable("Outbox__Enabled", "false", "Machine")
+```
+
+همچنین `TASKFLOW_API_KEY` باید در Secret Store/Environment خود Next.js TaskFlow تنظیم شده باشد. مقدار Worker و Web باید دقیقاً یکسان باشد. بعد از تنظیم متغیرهای Machine، سرویس Worker را Restart کنید تا Environment جدید را دریافت کند.
+
+برای فعال‌سازی Outbox فقط پس از preflight:
+```powershell
+[Environment]::SetEnvironmentVariable("Outbox__Enabled", "true", "Machine")
+Restart-Service -Name TaskFlowWorker
+```
+
+اتصال‌های `TenantRegistry__ConnectionString` و `TenantPasswordEncryption__KeyBase64` نیز باید از Secret Store یا Environment امن Worker تأمین شوند؛ مقادیر واقعی را در مخزن ثبت نکنید.
+
+در Repair، رویداد `RepairCompleted` در همان تراکنش تغییر وضعیت به `Repaired` در `dbo.OutboxMessages` ثبت می‌شود. Worker آن را به Job مرکزی `ProcessReminderEvent` تبدیل می‌کند. API رویداد در Tenant DB، `ReminderEventInbox` و `ReminderSchedules` را به‌صورت idempotent ثبت می‌کند؛ سرویس Tenant Reminder Sync سپس Schedule را به دیتابیس مرکزی منتقل می‌کند.
+
+پیش از فعال‌سازی، migrationهای زیر باید روی هر Tenant DB اجرا شده باشند:
+1. `database/tenant/001_outbox_schema.sql`
+2. `database/tenant/002_reminder_schedules.sql`
+3. `database/tenant/003_reminder_event_rules.sql`
+4. `database/tenant/004_seed_repair_completed_rule.sql`
+
+پس از Migrationها، اسکریپت `004_seed_repair_completed_rule.sql` را روی هر Tenant DB اجرا کنید. این اسکریپت Rule یکتای `RepairCompletedFollowUp` را با تأخیر پیش‌فرض 4320 دقیقه (سه روز)، TimeZone پیش‌فرض `Asia/Tehran` و ارسال یک‌باره ایجاد یا به‌روزرسانی می‌کند. TimeZone و متن پیام را قبل از اجرا با سیاست واقعی هر کسب‌وکار تطبیق دهید. Placeholderهای قابل استفاده در این event عبارت‌اند از `{{customerMobile}}`, `{{customerName}}`, `{{repairOrderNumber}}`.
+
+## محدودیت‌ها و راه‌اندازی
+- Outbox انتقال at-least-once با ثبت مرکزی idempotent فراهم می‌کند؛ ارسال SMS به Provider دقیقاً یک‌بار تضمین نمی‌شود.
+- API Key یک credential داخلی مشترک است و باید فقط به Worker مورد اعتماد داده شود؛ هرگز در Frontend قرار نگیرد.
+- رمزنگاری MasterRepair باید با decryptor فعلی AES-256-GCM v1 سازگار باشد و اتصال به هر Tenant DB باید با credential رمزگشایی‌شده تأیید شود.
+- قبل از Production، SQL Server integration tests، Build و تست End-to-End اجرا شوند.
+- برای ارسال واقعی SMS، `TenantSmsSettings.IsEnabled=1` و تنظیمات Provider معتبر برای Tenant آزمایشی لازم است؛ از شماره آزمایشی مجاز استفاده کنید.
+
+اجرا از پوشه `worker/TaskFlow.Worker`:
 ```powershell
 dotnet restore
+dotnet build -c Release
 dotnet run
 ```
 
-Publish برای Windows:
-```powershell
-dotnet publish -c Release -r win-x64 --self-contained false
-```
 
-Publish برای Linux:
-```bash
-dotnet publish -c Release -r linux-x64 --self-contained false
-```
+## ParsGreen SMS provider
 
-پروژه به‌صورت خودکار integration مربوط به Windows Service یا systemd را بر اساس سیستم‌عامل فعال می‌کند. برای اجرای دائمی، خروجی Publish را به سرویس سیستم بسپارید و Restart policy و دسترسی حداقلی فایل/شبکه را فعال کنید.
+The Worker adapter is integrated with the ParsGreen Apiv2 `/Apiv2/Message/SendSms` contract used by the Repair application:
+- `SmsGateway__BaseUrl=https://sms.parsgreen.ir/`
+- `SmsGateway__SendPath=Apiv2/Message/SendSms`
+- `SmsGateway__ApiKey`: ParsGreen API key, injected as a secret
+- `SmsGateway__TimeoutSeconds=20`
 
-## محدودیت‌های شناخته‌شده این مرحله
-- Handler عملیاتی فقط برای `SendSms` ثبت شده است.
-- قرارداد Gateway عمومی است و هنوز به Provider واقعی متصل نشده.
-- زمان‌بندی Recovery انجام می‌شود، اما مانیتورینگ و هشداردهی آن هنوز کامل نیست.
-- ترتیب ثابت صف‌ها می‌تواند در بار نامتوازن باعث گرسنگی صف‌های کم‌اولویت‌تر شود؛ Fair scheduling و quota واقعی هر Tenant هنوز پیاده نشده‌اند.
-- Exactly-once تضمین نمی‌شود. اگر Provider پیام را قبول کند ولی Worker پیش از ثبت Complete متوقف شود، احتمال ارسال مجدد وجود دارد. پشتیبانی Provider از Idempotency-Key باید بررسی شود.
-- Build و اجرای Integration Test در این محیط انجام نشده است.
+The Worker sends `SmsBody`, `Mobiles` (array), and `SmsNumber`, using the ParsGreen `Authorization: basic apikey:<key>` header; the sender number is read per tenant from `dbo.TenantSmsSettings`. The `RepairCompleted` seed records `ProviderCode=ParsGreen`; this Worker version uses a single configured ParsGreen gateway for all tenants, not provider-specific routing. The SendSms response is parsed from top-level `SuccessCount` and `DataList`; `DataList[].ReqID` is saved as `ProviderMessageId`. A successful submission is not the same as delivery. The Worker calls `POST Apiv2/Message/CheckDelivery` with `{ "RecId": "<ReqID>" }`. Based on the observed provider responses, DeliveryStatus 41 is Delivered, 50 is Pending, and 0 is Undelivered; unknown codes are retained without interpretation. Each SMS is checked at most twice. The Worker API key uses `SmsGateway__ApiKey` and is separate from `TaskFlowApi__ApiKey`.
+
+### SMS database migration and state model
+
+Run `database/006_sms_delivery_tracking.sql` once in the central `TaskFlow` database before deploying this Worker version. It adds independent submission and delivery state columns without changing the existing `SmsMessages.Status` (0..6) contract.
+
+- SubmissionState: 0 Pending, 1 Sending, 2 Accepted, 3 ProviderRejected, 4 NeedsReview (provider outcome ambiguous).
+- DeliveryState: 0 NotScheduled, 1 PendingCheck, 2 Delivered, 3 Undelivered, 4 Unconfirmed after two checks, 5 Unknown / not checkable.
+- A durable Pending -> Sending transition is committed before the external SendSms request. Any retry that sees a non-Pending state does not send again.
+- Network/HTTP/invalid-response ambiguity is moved to NeedsReview, never blindly retried. A stale Sending row is also moved to NeedsReview after the configured timeout.
+- Delivery checks are claimed atomically and the count is incremented before the HTTP request. A message can consume no more than two CheckDelivery requests, including failed requests. Default first and second check delays are 120 seconds.
+- DeliveryStatus 50 schedules the second check only when the first check returned 50. DeliveryStatus 0 is recorded as Undelivered and never triggers an automatic resend. After the second pending/failed check, the state becomes Unconfirmed.
+- ParsGreen acceptance without a ReqID is recorded as Accepted but not checkable; it is never resent.
+- Legacy rows matching the previous malformed-success response are migrated to NeedsReview to prevent accidental duplicate sends. Reconcile them manually with ParsGreen before any manual action.
+
+Configuration: `SmsDelivery__Enabled=true`, `SmsDelivery__PollingIntervalSeconds=15`, `SmsDelivery__FirstCheckDelaySeconds=120`, and `SmsDelivery__SubsequentCheckDelaySeconds=120`. The maximum check count is intentionally fixed at two and is not configurable above the provider's documented recommendation.
+
+برای کلید ParsGreen نیز `SmsGateway__ApiKey` را از Secret Store امن به Worker تزریق کنید. شماره فرستنده در هر Tenant باید در `dbo.TenantSmsSettings.SenderNumber` تنظیم و `IsEnabled=1` باشد. کلید ParsGreen و کلید `TASKFLOW_API_KEY` دو Secret متفاوت با کاربرد متفاوت هستند.
