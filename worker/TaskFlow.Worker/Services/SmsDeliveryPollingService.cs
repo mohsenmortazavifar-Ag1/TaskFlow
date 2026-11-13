@@ -30,6 +30,7 @@ public sealed class SmsDeliveryPollingService(
 
         var interval = TimeSpan.FromSeconds(Math.Clamp(config.PollingIntervalSeconds, 5, 300));
         logger.LogInformation("SMS delivery polling started. Maximum checks per message: 2.");
+        await LogDatabaseSessionDiagnosticsAsync(stoppingToken);
 
         using var timer = new PeriodicTimer(interval);
         do
@@ -109,14 +110,63 @@ public sealed class SmsDeliveryPollingService(
             logger.LogWarning("{Count} SMS messages were marked unconfirmed after the second-check lease expired.", count);
     }
 
+    private async Task LogDatabaseSessionDiagnosticsAsync(CancellationToken ct)
+    {
+        await using var connection = await jobs.OpenConnectionAsync(ct);
+        await using var command = new SqlCommand("""
+            SELECT
+                CAST(@@SPID AS int) AS SessionId,
+                CAST(DB_NAME() AS nvarchar(128)) AS DatabaseName,
+                CAST(session.transaction_isolation_level AS int) AS IsolationLevel,
+                database_info.is_read_committed_snapshot_on AS IsReadCommittedSnapshotOn,
+                CAST(database_info.snapshot_isolation_state_desc AS nvarchar(60)) AS SnapshotIsolationState
+            FROM sys.dm_exec_sessions AS session
+            INNER JOIN sys.databases AS database_info
+                ON database_info.database_id = DB_ID()
+            WHERE session.session_id = @@SPID;
+            """, connection);
+
+        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            logger.LogWarning("Could not read SQL Server session diagnostics for SMS delivery polling.");
+            return;
+        }
+
+        var sessionId = reader.GetInt32(0);
+        var databaseName = reader.GetString(1);
+        var isolationLevel = reader.GetInt32(2);
+        var isReadCommittedSnapshotOn = reader.GetBoolean(3);
+        var snapshotIsolationState = reader.GetString(4);
+        var isolationName = isolationLevel switch
+        {
+            1 => "READ UNCOMMITTED",
+            2 => "READ COMMITTED",
+            3 => "REPEATABLE READ",
+            4 => "SERIALIZABLE",
+            5 => "SNAPSHOT",
+            _ => $"UNKNOWN ({isolationLevel})"
+        };
+
+        logger.LogInformation(
+            "SMS delivery SQL session diagnostics: SessionId={SessionId}, Database={DatabaseName}, Isolation={IsolationLevel} ({IsolationName}), READ_COMMITTED_SNAPSHOT={ReadCommittedSnapshotOn}, SnapshotIsolationState={SnapshotIsolationState}.",
+            sessionId, databaseName, isolationLevel, isolationName,
+            isReadCommittedSnapshotOn, snapshotIsolationState);
+    }
+
     private async Task<IReadOnlyList<DueSms>> ClaimDueMessagesAsync(CancellationToken ct)
     {
         await using var connection = await jobs.OpenConnectionAsync(ct);
         await using var command = new SqlCommand("""
+            -- READPAST requires a locking READ COMMITTED/REPEATABLE READ session.
+            -- Force READ COMMITTED for this standalone claim operation. READCOMMITTEDLOCK
+            -- is also required when the database has READ_COMMITTED_SNAPSHOT enabled.
+            SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+
             ;WITH Due AS
             (
                 SELECT TOP (@BatchSize) *
-                FROM dbo.SmsMessages WITH (UPDLOCK, READPAST, ROWLOCK)
+                FROM dbo.SmsMessages WITH (UPDLOCK, READPAST, ROWLOCK, READCOMMITTEDLOCK)
                 WHERE SubmissionState = 2
                   AND DeliveryState = 1
                   AND ProviderMessageId IS NOT NULL
