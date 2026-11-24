@@ -46,3 +46,13 @@ Replace the rule ID and message with the tenant's actual rule and approved text.
 - `LocalTime` is applied to the first due date after the configured delay and to subsequent recurring dates using `TimeZoneId`.
 - `CancelEventType` accepts one event code or a comma-separated list. A matching cancellation event disables the schedule, clears its next run time and increments `ScheduleVersion`, invalidating queued-but-not-yet-executed occurrences.
 - Changing a row in `ReminderEventRules` affects schedules created by future events; it does not rewrite existing schedules. Edit or cancel an existing schedule through the reminder API, which increments that schedule's `ScheduleVersion` and invalidates older queued occurrences.
+
+## Repair-order-selected one-time service reminder
+
+For `RepairCompletedFollowUp`, migration `database/tenant/006_order_selected_service_reminder_delay.sql` changes the rule to read `serviceReminderIntervalMonths` from the event payload. Repair sends this value only when the operator enabled the reminder for that repair order. Supported values are 3, 6, and 12 calendar months.
+
+The due date is calculated from the event's `occurredAtUtc` in the rule's `TimeZoneId`, clamping month-end dates (for example, November 30 plus three months becomes February 28/29). The schedule is one-shot: no recurrence interval is stored, so the scheduler clears `NextRunAtUtc` after materializing its single occurrence. The rule also uses `MaxOccurrences = 1`.
+
+Apply `004_seed_repair_completed_rule.sql` first, then `006_order_selected_service_reminder_delay.sql` to every Repair tenant database. The latter invalidates previously projected fixed-delay schedules for this rule; the tenant reminder sync must run so the central scheduler projection receives the disabled state.
+
+Repair emits the selected interval only on the `RepairCompleted` event created by the transition to `Repaired`. If the order preference is disabled, the dynamic rule is skipped and no follow-up schedule is created. Moving the order back to repair, delivering it, or cancelling it disables any active schedule.
