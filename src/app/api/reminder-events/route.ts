@@ -70,23 +70,33 @@ function calculateInitialDueAt(
   const month = Number(part("month"));
   const day = Number(part("day"));
   const [hour, minute] = localTime.split(":").map(Number);
-  const targetUtcLike = Date.UTC(year, month - 1, day, hour, minute, 0);
-  let candidate = targetUtcLike;
+  let targetUtcLike = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const resolveLocalTime = () => {
+    let candidate = targetUtcLike;
+    for (let i = 0; i < 4; i++) {
+      const probe = formatter.formatToParts(new Date(candidate));
+      const value = (type: Intl.DateTimeFormatPartTypes) => Number(probe.find(x => x.type === type)?.value ?? 0);
+      const represented = Date.UTC(value("year"), value("month") - 1, value("day"),
+        value("hour"), value("minute"), value("second"));
+      candidate += targetUtcLike - represented;
+    }
+    return new Date(candidate);
+  };
 
-  for (let i = 0; i < 4; i++) {
-    const probe = formatter.formatToParts(new Date(candidate));
-    const value = (type: Intl.DateTimeFormatPartTypes) => Number(probe.find(x => x.type === type)?.value ?? 0);
-    const represented = Date.UTC(value("year"), value("month") - 1, value("day"),
-      value("hour"), value("minute"), value("second"));
-    candidate += targetUtcLike - represented;
+  let resolved = resolveLocalTime();
+  // The requested local clock time must not move the reminder before its delay has elapsed.
+  if (resolved.getTime() < delayed.getTime()) {
+    targetUtcLike += 24 * 60 * 60 * 1000;
+    resolved = resolveLocalTime();
   }
 
-  const resolved = new Date(candidate);
   const check = formatter.formatToParts(resolved);
   const get = (type: Intl.DateTimeFormatPartTypes) => check.find(x => x.type === type)?.value;
-  if (Number(get("year")) !== year || Number(get("month")) !== month ||
-      Number(get("day")) !== day || Number(get("hour")) !== hour ||
-      Number(get("minute")) !== minute) {
+  const expectedDate = new Date(targetUtcLike);
+  if (Number(get("year")) !== expectedDate.getUTCFullYear() ||
+      Number(get("month")) !== expectedDate.getUTCMonth() + 1 ||
+      Number(get("day")) !== expectedDate.getUTCDate() ||
+      Number(get("hour")) !== hour || Number(get("minute")) !== minute) {
     throw new Error("EVENT_LOCAL_TIME_INVALID_FOR_TIME_ZONE");
   }
   return resolved;
