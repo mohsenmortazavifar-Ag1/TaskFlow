@@ -25,6 +25,8 @@ type EventRule = {
   ReminderType: string;
   SourceEntity: string;
   DelayMinutes: number;
+  DelayDataKey: string | null;
+  DelayUnit: "month" | null;
   TimeZoneId: string;
   MobileTemplate: string;
   MessageTemplate: string;
@@ -102,6 +104,36 @@ function calculateInitialDueAt(
       Number(get("hour")) !== hour || Number(get("minute")) !== minute) {
     throw new Error("EVENT_LOCAL_TIME_INVALID_FOR_TIME_ZONE");
   }
+  return resolved;
+}
+
+function calculateCalendarMonthDueAt(occurredAtUtc: string, months: number, timeZoneId: string, localTime: string | null): Date {
+  if (!Number.isInteger(months) || ![3, 6, 12].includes(months)) throw new Error("EVENT_INVALID_DYNAMIC_MONTH_DELAY");
+  let formatter: Intl.DateTimeFormat;
+  try { formatter = new Intl.DateTimeFormat("en-CA", { timeZone: timeZoneId, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }); }
+  catch { throw new Error("EVENT_INVALID_TIME_ZONE"); }
+  const source = new Date(occurredAtUtc);
+  if (!Number.isFinite(source.getTime())) throw new Error("EVENT_INVALID_OCCURRED_AT");
+  const parts = formatter.formatToParts(source);
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find(x => x.type === type)?.value ?? 0);
+  const sourceYear = part("year"), sourceMonth = part("month"), sourceDay = part("day");
+  const sourceHour = part("hour"), sourceMinute = part("minute");
+  const monthIndex = sourceYear * 12 + sourceMonth - 1 + months;
+  const year = Math.floor(monthIndex / 12), month = monthIndex % 12 + 1;
+  const day = Math.min(sourceDay, new Date(Date.UTC(year, month, 0)).getUTCDate());
+  const [hour, minute] = localTime ? localTime.split(":").map(Number) : [sourceHour, sourceMinute];
+  if (localTime && !/^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(localTime)) throw new Error("EVENT_INVALID_LOCAL_TIME");
+  const target = Date.UTC(year, month - 1, day, hour, minute, 0);
+  let candidate = target;
+  for (let i = 0; i < 6; i++) {
+    const probe = formatter.formatToParts(new Date(candidate));
+    const value = (type: Intl.DateTimeFormatPartTypes) => Number(probe.find(x => x.type === type)?.value ?? 0);
+    const represented = Date.UTC(value("year"), value("month") - 1, value("day"), value("hour"), value("minute"), value("second"));
+    candidate += target - represented;
+  }
+  const resolved = new Date(candidate), check = formatter.formatToParts(resolved);
+  const get = (type: Intl.DateTimeFormatPartTypes) => Number(check.find(x => x.type === type)?.value ?? 0);
+  if (get("year") !== year || get("month") !== month || get("day") !== day || get("hour") !== hour || get("minute") !== minute) throw new Error("EVENT_LOCAL_TIME_INVALID_FOR_TIME_ZONE");
   return resolved;
 }
 
@@ -194,7 +226,7 @@ export async function POST(req: Request) {
             .input("SourceEntity", sql.NVarChar(100), event.sourceEntity)
             .query<EventRule>(`
               SELECT ReminderEventRuleId, EventType, ReminderType, SourceEntity,
-                     DelayMinutes, TimeZoneId, MobileTemplate, MessageTemplate,
+                     DelayMinutes, DelayDataKey, DelayUnit, TimeZoneId, MobileTemplate, MessageTemplate,
                      ProviderCode, RecurrenceIntervalValue, RecurrenceIntervalUnit, LocalTime,
                      CancelEventType, MaxOccurrences
               FROM notification.ReminderEventRules WITH (UPDLOCK, HOLDLOCK)
@@ -269,14 +301,17 @@ export async function POST(req: Request) {
             occurredAtUtc: event.occurredAtUtc
           };
           for (const rule of rulesResult.recordset) {
+            const dynamicDelayValue = rule.DelayDataKey ? values[rule.DelayDataKey] : undefined;
+            if (rule.DelayDataKey && !dynamicDelayValue) continue;
+            if (rule.DelayDataKey && rule.DelayUnit !== "month") throw new Error("EVENT_UNSUPPORTED_DYNAMIC_DELAY_UNIT");
             const mobile = renderTemplate(rule.MobileTemplate, values).trim();
             const message = renderTemplate(rule.MessageTemplate, values).trim();
             if (!mobile || mobile.length > 20) throw new Error("EVENT_INVALID_RENDERED_MOBILE");
             if (!message || message.length > 2000) throw new Error("EVENT_INVALID_RENDERED_MESSAGE");
 
-            const dueAt = calculateInitialDueAt(
-              event.occurredAtUtc, rule.DelayMinutes, rule.TimeZoneId, rule.LocalTime
-            );
+            const dueAt = rule.DelayDataKey
+              ? calculateCalendarMonthDueAt(event.occurredAtUtc, Number(dynamicDelayValue), rule.TimeZoneId, rule.LocalTime)
+              : calculateInitialDueAt(event.occurredAtUtc, rule.DelayMinutes, rule.TimeZoneId, rule.LocalTime);
             const ruleJson = {
               ruleId: rule.ReminderEventRuleId,
               mobile,
