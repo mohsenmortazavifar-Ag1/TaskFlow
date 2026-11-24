@@ -128,7 +128,7 @@ public sealed class ExecuteReminderHandler(JobRepository jobs) : IJobHandler
             {
                 insertJob.Parameters.Add("@TenantId", SqlDbType.BigInt).Value = tenantId;
                 insertJob.Parameters.Add("@Payload", SqlDbType.NVarChar, -1).Value =
-                    JsonSerializer.Serialize(new { smsMessageId });
+                    JsonSerializer.Serialize(new { smsMessageId, reminderOccurrenceId = occurrenceId });
                 insertJob.Parameters.Add("@IdempotencyKey", SqlDbType.NVarChar, 200).Value = smsKey;
                 smsJobId = Convert.ToInt64(await insertJob.ExecuteScalarAsync(cancellationToken));
             }

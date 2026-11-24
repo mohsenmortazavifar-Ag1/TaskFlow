@@ -2,9 +2,13 @@
   Run once in every tenant operational database before enabling Outbox Dispatcher.
   Status: 0=Pending, 1=Processing, 2=Published, 3=Dead.
 */
-IF OBJECT_ID(N'dbo.OutboxMessages', N'U') IS NULL
+IF SCHEMA_ID(N'notification') IS NULL EXEC(N'CREATE SCHEMA notification');
+IF OBJECT_ID(N'dbo.OutboxMessages', N'U') IS NOT NULL AND OBJECT_ID(N'notification.OutboxMessages', N'U') IS NULL
+    EXEC(N'ALTER SCHEMA notification TRANSFER dbo.OutboxMessages');
+
+IF OBJECT_ID(N'notification.OutboxMessages', N'U') IS NULL
 BEGIN
-    CREATE TABLE dbo.OutboxMessages
+    CREATE TABLE notification.OutboxMessages
     (
         OutboxId BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_OutboxMessages PRIMARY KEY,
         EventId UNIQUEIDENTIFIER NOT NULL,
@@ -30,7 +34,7 @@ BEGIN
     );
 
     CREATE INDEX IX_OutboxMessages_Dispatch
-        ON dbo.OutboxMessages(Status, NextAttemptAt, Priority DESC, CreatedAt, OutboxId)
+        ON notification.OutboxMessages(Status, NextAttemptAt, Priority DESC, CreatedAt, OutboxId)
         INCLUDE(EventId, TenantId, EventType, QueueName, JobType, AttemptCount, MaxAttempts, LockedUntil);
 END;
 GO
@@ -39,7 +43,7 @@ GO
 Example SMS event. The operation that changes business data and this insert
 must be committed in the SAME tenant-database transaction.
 
-INSERT dbo.OutboxMessages
+INSERT notification.OutboxMessages
     (EventId, TenantId, EventType, QueueName, JobType, Payload, Priority)
 VALUES
     (NEWID(), 125, N'SmsRequested', N'sms', N'SendSms',

@@ -132,7 +132,7 @@ public sealed class TenantReminderSyncService(
         await using (var read = new SqlCommand("""
             SELECT ReminderScheduleId, ReminderType, SourceEntity, SourceEntityId,
                    RuleJson, TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc, UpdatedAt
-            FROM dbo.ReminderSchedules
+            FROM notification.ReminderSchedules
             ORDER BY UpdatedAt, ReminderScheduleId;
             """, source) { CommandTimeout = 30 })
         {
@@ -251,11 +251,11 @@ public sealed class TenantReminderSyncService(
             BEGIN
                 INSERT INTO dbo.ReminderSchedules
                     (TenantId, ReminderType, SourceEntity, SourceEntityId, RuleJson,
-                     TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc,
+                     TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc, OccurrenceCount,
                      TenantDatabaseId, TenantReminderScheduleId, SourceUpdatedAt)
                 VALUES
                     (@TenantId, @ReminderType, @SourceEntity, @SourceEntityId, @RuleJson,
-                     @TimeZoneId, @ScheduleVersion, @IsEnabled, @NextRunAtUtc,
+                     @TimeZoneId, @ScheduleVersion, @IsEnabled, @NextRunAtUtc, 0,
                      @TenantDatabaseId, @TenantReminderScheduleId, @SourceUpdatedAt);
 
                 SET @Action = 1; -- Inserted
@@ -292,6 +292,7 @@ public sealed class TenantReminderSyncService(
                     RuleJson = @RuleJson,
                     TimeZoneId = @TimeZoneId,
                     ScheduleVersion = @ScheduleVersion,
+                    OccurrenceCount = CASE WHEN ScheduleVersion <> @ScheduleVersion THEN 0 ELSE OccurrenceCount END,
                     IsEnabled = @IsEnabled,
                     -- The central scheduler owns the execution cursor after initial import.
                     -- Reset it only when the tenant explicitly increments ScheduleVersion.

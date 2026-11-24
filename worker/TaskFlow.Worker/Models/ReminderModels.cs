@@ -9,7 +9,8 @@ public sealed record DueReminderSchedule(
     string RuleJson,
     string TimeZoneId,
     int ScheduleVersion,
-    DateTime NextRunAtUtc);
+    DateTime NextRunAtUtc,
+    int OccurrenceCount);
 
 public sealed record ReminderRule(
     string Mobile,
@@ -17,4 +18,5 @@ public sealed record ReminderRule(
     string? ProviderCode,
     int? IntervalValue,
     string? IntervalUnit,
-    string? LocalTime);
+    string? LocalTime,
+    int? MaxOccurrences = null);

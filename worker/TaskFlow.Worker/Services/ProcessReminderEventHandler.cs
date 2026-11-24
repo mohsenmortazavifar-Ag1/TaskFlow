@@ -31,7 +31,10 @@ public sealed class ProcessReminderEventHandler(
         if (!root.TryGetProperty("eventId", out var eventNode) ||
             !Guid.TryParse(eventNode.GetString(), out _) ||
             !root.TryGetProperty("eventType", out var typeNode) ||
-            !string.Equals(typeNode.GetString(), "RepairCompleted", StringComparison.Ordinal))
+            string.IsNullOrWhiteSpace(typeNode.GetString()) ||
+            typeNode.GetString()!.Length > 100 ||
+            !char.IsLetter(typeNode.GetString()![0]) ||
+            typeNode.GetString()!.Any(ch => !char.IsLetterOrDigit(ch) && ch is not '_' and not '.' and not '-'))
             throw new InvalidOperationException("Unsupported or invalid reminder event payload.");
 
         var config = options.Value;

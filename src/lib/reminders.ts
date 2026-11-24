@@ -36,7 +36,7 @@ export async function syncReminderProjection(
       SET XACT_ABORT ON;
       BEGIN TRANSACTION;
 
-      UPDATE dbo.ReminderSchedules WITH (UPDLOCK, SERIALIZABLE)
+      UPDATE notification.ReminderSchedules WITH (UPDLOCK, SERIALIZABLE)
       SET TenantId = @TenantId,
           ReminderType = @ReminderType,
           SourceEntity = @SourceEntity,
@@ -44,6 +44,7 @@ export async function syncReminderProjection(
           RuleJson = @RuleJson,
           TimeZoneId = @TimeZoneId,
           ScheduleVersion = @ScheduleVersion,
+          OccurrenceCount = CASE WHEN ScheduleVersion <> @ScheduleVersion THEN 0 ELSE OccurrenceCount END,
           IsEnabled = @IsEnabled,
           NextRunAtUtc = @NextRunAtUtc,
           SourceUpdatedAt = @SourceUpdatedAt,
@@ -53,13 +54,13 @@ export async function syncReminderProjection(
 
       IF @@ROWCOUNT = 0
       BEGIN
-        INSERT INTO dbo.ReminderSchedules
+        INSERT INTO notification.ReminderSchedules
           (TenantId, ReminderType, SourceEntity, SourceEntityId, RuleJson,
-           TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc,
+           TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc, OccurrenceCount,
            TenantDatabaseId, TenantReminderScheduleId, SourceUpdatedAt)
         VALUES
           (@TenantId, @ReminderType, @SourceEntity, @SourceEntityId, @RuleJson,
-           @TimeZoneId, @ScheduleVersion, @IsEnabled, @NextRunAtUtc,
+           @TimeZoneId, @ScheduleVersion, @IsEnabled, @NextRunAtUtc, 0,
            @TenantDatabaseId, @TenantReminderScheduleId, @SourceUpdatedAt);
       END;
 
@@ -82,7 +83,7 @@ export async function getCentralReminderCursor(
     .input("TenantReminderScheduleId", sql.BigInt, reminderScheduleId)
     .query(`
       SELECT NextRunAtUtc
-      FROM dbo.ReminderSchedules
+      FROM notification.ReminderSchedules
       WHERE TenantDatabaseId = @TenantDatabaseId
         AND TenantReminderScheduleId = @TenantReminderScheduleId;
     `);

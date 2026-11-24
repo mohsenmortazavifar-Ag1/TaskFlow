@@ -14,7 +14,8 @@ const ruleSchema = z.object({
   providerCode: z.string().trim().max(50).optional(),
   intervalValue: z.number().int().min(1).max(3650).optional(),
   intervalUnit: z.enum(["day", "month", "year"]).optional(),
-  localTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional()
+  localTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional(),
+  maxOccurrences: z.number().int().min(1).max(1000).optional()
 }).strict().refine(v => (v.intervalValue === undefined) === (v.intervalUnit === undefined), {
   message: "intervalValue and intervalUnit must be supplied together."
 });
@@ -69,7 +70,7 @@ export async function PATCH(req: Request, context: {params: Promise<{reminderId:
           .query(`
             SELECT ReminderScheduleId, ReminderType, SourceEntity, SourceEntityId, RuleJson,
                    TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc
-            FROM dbo.ReminderSchedules WITH (UPDLOCK, HOLDLOCK)
+            FROM notification.ReminderSchedules WITH (UPDLOCK, HOLDLOCK)
             WHERE ReminderScheduleId = @ReminderScheduleId;
           `);
         const current = currentResult.recordset[0];
@@ -96,7 +97,7 @@ export async function PATCH(req: Request, context: {params: Promise<{reminderId:
           .input("NextRunAtUtc", sql.DateTime2, values.nextRunAtUtc)
           .input("ScheduleVersion", sql.Int, values.scheduleVersion)
           .query(`
-            UPDATE dbo.ReminderSchedules
+            UPDATE notification.ReminderSchedules
             SET ReminderType = @ReminderType, SourceEntity = @SourceEntity,
                 SourceEntityId = @SourceEntityId, RuleJson = @RuleJson,
                 TimeZoneId = @TimeZoneId, NextRunAtUtc = @NextRunAtUtc,
@@ -173,7 +174,7 @@ export async function DELETE(req: Request, context: {params: Promise<{reminderId
           .query(`
             SELECT ReminderScheduleId, ReminderType, SourceEntity, SourceEntityId, RuleJson,
                    TimeZoneId, ScheduleVersion, IsEnabled
-            FROM dbo.ReminderSchedules WITH (UPDLOCK, HOLDLOCK)
+            FROM notification.ReminderSchedules WITH (UPDLOCK, HOLDLOCK)
             WHERE ReminderScheduleId = @ReminderScheduleId;
           `);
         const current = result.recordset[0];
@@ -184,7 +185,7 @@ export async function DELETE(req: Request, context: {params: Promise<{reminderId
           .input("ReminderScheduleId", sql.BigInt, reminderId)
           .input("ScheduleVersion", sql.Int, current.ScheduleVersion + 1)
           .query(`
-            UPDATE dbo.ReminderSchedules
+            UPDATE notification.ReminderSchedules
             SET IsEnabled = 0, NextRunAtUtc = NULL,
                 ScheduleVersion = @ScheduleVersion, UpdatedAt = SYSUTCDATETIME()
             OUTPUT INSERTED.ReminderScheduleId, INSERTED.ReminderType, INSERTED.SourceEntity,

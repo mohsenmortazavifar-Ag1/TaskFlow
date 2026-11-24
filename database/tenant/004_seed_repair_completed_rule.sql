@@ -12,8 +12,8 @@
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-IF OBJECT_ID(N'dbo.ReminderEventRules', N'U') IS NULL
-    THROW 51000, 'dbo.ReminderEventRules does not exist. Apply 003_reminder_event_rules.sql first.', 1;
+IF OBJECT_ID(N'notification.ReminderEventRules', N'U') IS NULL
+    THROW 51000, 'notification.ReminderEventRules does not exist. Apply 003_reminder_event_rules.sql first.', 1;
 
 DECLARE @EventType nvarchar(100) = N'RepairCompleted';
 DECLARE @ReminderType nvarchar(100) = N'RepairCompletedFollowUp';
@@ -29,7 +29,7 @@ BEGIN TRY
 
     DECLARE @ExistingCount int;
     SELECT @ExistingCount = COUNT(*)
-    FROM dbo.ReminderEventRules WITH (UPDLOCK, HOLDLOCK)
+    FROM notification.ReminderEventRules WITH (UPDLOCK, HOLDLOCK)
     WHERE EventType = @EventType
       AND ReminderType = @ReminderType
       AND SourceEntity = @SourceEntity;
@@ -39,7 +39,7 @@ BEGIN TRY
 
     IF @ExistingCount = 1
     BEGIN
-        UPDATE dbo.ReminderEventRules
+        UPDATE notification.ReminderEventRules
         SET DelayMinutes = @DelayMinutes,
             TimeZoneId = @TimeZoneId,
             MobileTemplate = @MobileTemplate,
@@ -56,7 +56,7 @@ BEGIN TRY
     END
     ELSE
     BEGIN
-        INSERT INTO dbo.ReminderEventRules
+        INSERT INTO notification.ReminderEventRules
         (
             EventType, ReminderType, SourceEntity, DelayMinutes, TimeZoneId,
             MobileTemplate, MessageTemplate, ProviderCode,
@@ -75,7 +75,7 @@ BEGIN TRY
     SELECT ReminderEventRuleId, EventType, ReminderType, SourceEntity,
            DelayMinutes, TimeZoneId, MobileTemplate, MessageTemplate,
            ProviderCode, IsEnabled, UpdatedAt
-    FROM dbo.ReminderEventRules
+    FROM notification.ReminderEventRules
     WHERE EventType = @EventType
       AND ReminderType = @ReminderType
       AND SourceEntity = @SourceEntity;
