@@ -53,7 +53,7 @@ function calculateInitialDueAt(
   const delayed = new Date(new Date(occurredAtUtc).getTime() + delayMinutes * 60_000);
   if (!Number.isFinite(delayed.getTime())) throw new Error("EVENT_INVALID_OCCURRED_AT");
   if (!localTime) return delayed;
-  if (!/^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(localTime))
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\\d$/.test(localTime))
     throw new Error("EVENT_INVALID_LOCAL_TIME");
 
   let formatter: Intl.DateTimeFormat;
@@ -137,7 +137,7 @@ export async function POST(req: Request) {
             .input("EventId", sql.UniqueIdentifier, event.eventId)
             .query(`
               SELECT Status, CreatedReminderCount
-              FROM dbo.ReminderEventInbox WITH (UPDLOCK, HOLDLOCK)
+              FROM notification.ReminderEventInbox WITH (UPDLOCK, HOLDLOCK)
               WHERE EventId = @EventId;
             `);
 
@@ -148,7 +148,7 @@ export async function POST(req: Request) {
               .query(`
                 SELECT ReminderScheduleId, ReminderType, SourceEntity, SourceEntityId,
                        RuleJson, TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc, UpdatedAt
-                FROM dbo.ReminderSchedules
+                FROM notification.ReminderSchedules
                 WHERE SourceEntity = @SourceEntity AND SourceEntityId = @SourceEntityId;
               `);
             const reminders: ReminderDefinition[] = existingSchedules.recordset.map(row => ({
@@ -180,7 +180,7 @@ export async function POST(req: Request) {
             .input("SourceEntityId", sql.BigInt, event.sourceEntityId)
             .input("OccurredAtUtc", sql.DateTime2, new Date(event.occurredAtUtc))
             .query(`
-              INSERT INTO dbo.ReminderEventInbox
+              INSERT INTO notification.ReminderEventInbox
                 (EventId, EventType, SourceEntity, SourceEntityId, OccurredAtUtc, Status)
               VALUES
                 (@EventId, @EventType, @SourceEntity, @SourceEntityId, @OccurredAtUtc, 0);
@@ -197,7 +197,7 @@ export async function POST(req: Request) {
                      DelayMinutes, TimeZoneId, MobileTemplate, MessageTemplate,
                      ProviderCode, RecurrenceIntervalValue, RecurrenceIntervalUnit, LocalTime,
                      CancelEventType, MaxOccurrences
-              FROM dbo.ReminderEventRules WITH (UPDLOCK, HOLDLOCK)
+              FROM notification.ReminderEventRules WITH (UPDLOCK, HOLDLOCK)
               WHERE EXISTS (
                   SELECT 1
                   FROM STRING_SPLIT(CancelEventType, N',') AS cancelType
@@ -215,7 +215,7 @@ export async function POST(req: Request) {
               .input("ReminderType", sql.NVarChar(100), cancelRule.ReminderType)
               .input("ReminderEventRuleId", sql.BigInt, cancelRule.ReminderEventRuleId)
               .query(`
-                UPDATE dbo.ReminderSchedules
+                UPDATE notification.ReminderSchedules
                 SET IsEnabled = 0, NextRunAtUtc = NULL,
                     ScheduleVersion = ScheduleVersion + 1,
                     UpdatedAt = SYSUTCDATETIME()
@@ -253,7 +253,7 @@ export async function POST(req: Request) {
                      DelayMinutes, TimeZoneId, MobileTemplate, MessageTemplate,
                      ProviderCode, RecurrenceIntervalValue, RecurrenceIntervalUnit, LocalTime,
                      CancelEventType, MaxOccurrences
-              FROM dbo.ReminderEventRules WITH (UPDLOCK, HOLDLOCK)
+              FROM notification.ReminderEventRules WITH (UPDLOCK, HOLDLOCK)
               WHERE EventType = @EventType
                 AND SourceEntity = @SourceEntity
                 AND IsEnabled = 1
@@ -297,7 +297,7 @@ export async function POST(req: Request) {
               .input("TimeZoneId", sql.NVarChar(100), rule.TimeZoneId)
               .input("NextRunAtUtc", sql.DateTime2, dueAt)
               .query(`
-                INSERT INTO dbo.ReminderSchedules
+                INSERT INTO notification.ReminderSchedules
                   (ReminderType, SourceEntity, SourceEntityId, RuleJson, TimeZoneId,
                    ScheduleVersion, IsEnabled, NextRunAtUtc, CreatedAt, UpdatedAt)
                 OUTPUT INSERTED.ReminderScheduleId, INSERTED.ReminderType,
@@ -331,7 +331,7 @@ export async function POST(req: Request) {
             .input("Status", sql.TinyInt, status)
             .input("CreatedReminderCount", sql.Int, createdReminderCount)
             .query(`
-              UPDATE dbo.ReminderEventInbox
+              UPDATE notification.ReminderEventInbox
               SET Status = @Status,
                   CreatedReminderCount = @CreatedReminderCount,
                   ProcessedAtUtc = SYSUTCDATETIME()
