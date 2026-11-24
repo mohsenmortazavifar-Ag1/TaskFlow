@@ -39,4 +39,21 @@ SET DelayMinutes = 0,
 WHERE EventType = N'RepairCompleted'
   AND ReminderType = N'RepairCompletedFollowUp'
   AND SourceEntity = N'RepairOrder';
+
+-- Invalidate previously scheduled fixed-delay follow-ups. Only events created
+-- after this migration can carry the order-specific interval and create a new schedule.
+UPDATE schedule
+SET IsEnabled = 0,
+    NextRunAtUtc = NULL,
+    ScheduleVersion = ScheduleVersion + 1,
+    UpdatedAt = SYSUTCDATETIME()
+FROM notification.ReminderSchedules AS schedule
+WHERE schedule.IsEnabled = 1
+  AND JSON_VALUE(schedule.RuleJson, '$.ruleId') IN (
+    SELECT CONVERT(nvarchar(20), ReminderEventRuleId)
+    FROM notification.ReminderEventRules
+    WHERE EventType = N'RepairCompleted'
+      AND ReminderType = N'RepairCompletedFollowUp'
+      AND SourceEntity = N'RepairOrder'
+  );
 GO
