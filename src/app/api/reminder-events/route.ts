@@ -142,13 +142,34 @@ export async function POST(req: Request) {
             `);
 
           if (existing.recordset.length > 0) {
+            const existingSchedules = await new sql.Request(transaction)
+              .input("SourceEntity", sql.NVarChar(100), event.sourceEntity)
+              .input("SourceEntityId", sql.BigInt, event.sourceEntityId)
+              .query(`
+                SELECT ReminderScheduleId, ReminderType, SourceEntity, SourceEntityId,
+                       RuleJson, TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc, UpdatedAt
+                FROM dbo.ReminderSchedules
+                WHERE SourceEntity = @SourceEntity AND SourceEntityId = @SourceEntityId;
+              `);
+            const reminders: ReminderDefinition[] = existingSchedules.recordset.map(row => ({
+              reminderScheduleId: row.ReminderScheduleId,
+              reminderType: row.ReminderType,
+              sourceEntity: row.SourceEntity,
+              sourceEntityId: row.SourceEntityId,
+              ruleJson: row.RuleJson,
+              timeZoneId: row.TimeZoneId,
+              scheduleVersion: row.ScheduleVersion,
+              isEnabled: row.IsEnabled,
+              nextRunAtUtc: row.NextRunAtUtc,
+              updatedAt: row.UpdatedAt
+            }));
             await transaction.commit();
             return {
               tenant,
               duplicate: true,
               status: existing.recordset[0].Status,
               createdCount: existing.recordset[0].CreatedReminderCount,
-              reminders: [] as ReminderDefinition[]
+              reminders
             };
           }
 
@@ -326,14 +347,6 @@ export async function POST(req: Request) {
       }
     );
 
-    if (outcome.duplicate) {
-      return NextResponse.json({
-        accepted: true,
-        duplicate: true,
-        createdReminderCount: outcome.createdCount
-      });
-    }
-
     let syncPending = false;
     for (const reminder of outcome.reminders) {
       try {
@@ -343,12 +356,24 @@ export async function POST(req: Request) {
       }
     }
 
+    if (syncPending) {
+      // Return a retryable error. The inbox is idempotent; on retry the duplicate path
+      // reprojects the already-committed tenant schedules into the central scheduler.
+      return NextResponse.json({
+        accepted: false,
+        duplicate: outcome.duplicate,
+        eventId: event.eventId,
+        synchronizationPending: true
+      }, {status: 503});
+    }
+
     return NextResponse.json({
       accepted: true,
+      duplicate: outcome.duplicate,
       eventId: event.eventId,
       createdReminderCount: outcome.createdCount,
-      synchronizationPending: syncPending
-    }, {status: syncPending ? 202 : 201});
+      synchronizationPending: false
+    }, {status: outcome.duplicate ? 200 : 201});
   } catch (error) {
     return errorResponse(error);
   }
