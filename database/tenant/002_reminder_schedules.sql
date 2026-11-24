@@ -1,8 +1,8 @@
 -- Apply to each tenant database.
 -- Tenant-local definitions are the source of truth. Worker projects these rows into central TaskFlow.
 IF SCHEMA_ID(N'notification') IS NULL EXEC(N'CREATE SCHEMA notification');
-IF OBJECT_ID(N'notification.ReminderSchedules', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderSchedules', N'U') IS NULL
-    EXEC(N'ALTER SCHEMA notification TRANSFER notification.ReminderSchedules');
+IF OBJECT_ID(N'dbo.ReminderSchedules', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderSchedules', N'U') IS NULL
+    EXEC(N'ALTER SCHEMA notification TRANSFER dbo.ReminderSchedules');
 
 IF OBJECT_ID('notification.ReminderSchedules', 'U') IS NULL
 BEGIN
