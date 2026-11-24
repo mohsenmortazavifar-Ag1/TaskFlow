@@ -153,6 +153,7 @@ export async function POST(req: Request) {
             `);
 
           const reminders: ReminderDefinition[] = [];
+          let createdReminderCount = 0;
 
           const cancellationRules = await new sql.Request(transaction)
             .input("CancelEventType", sql.NVarChar(100), event.eventType)
@@ -174,6 +175,7 @@ export async function POST(req: Request) {
               .input("SourceEntity", sql.NVarChar(100), event.sourceEntity)
               .input("SourceEntityId", sql.BigInt, event.sourceEntityId)
               .input("ReminderType", sql.NVarChar(100), cancelRule.ReminderType)
+              .input("ReminderEventRuleId", sql.BigInt, cancelRule.ReminderEventRuleId)
               .query(`
                 UPDATE dbo.ReminderSchedules
                 SET IsEnabled = 0, NextRunAtUtc = NULL,
@@ -185,7 +187,8 @@ export async function POST(req: Request) {
                        INSERTED.NextRunAtUtc, INSERTED.UpdatedAt
                 WHERE SourceEntity = @SourceEntity
                   AND SourceEntityId = @SourceEntityId
-                  AND ReminderType = @ReminderType
+                  AND (JSON_VALUE(RuleJson, '$.ruleId') = CONVERT(nvarchar(20), @ReminderEventRuleId)
+                       OR (JSON_VALUE(RuleJson, '$.ruleId') IS NULL AND ReminderType = @ReminderType))
                   AND IsEnabled = 1;
               `);
             for (const row of cancelled.recordset) {
@@ -237,6 +240,7 @@ export async function POST(req: Request) {
               event.occurredAtUtc, rule.DelayMinutes, rule.TimeZoneId, rule.LocalTime
             );
             const ruleJson = {
+              ruleId: rule.ReminderEventRuleId,
               mobile,
               message,
               ...(rule.ProviderCode ? {providerCode: rule.ProviderCode} : {}),
@@ -268,6 +272,7 @@ export async function POST(req: Request) {
               `);
 
             const row = inserted.recordset[0];
+            createdReminderCount++;
             reminders.push({
               reminderScheduleId: row.ReminderScheduleId,
               reminderType: row.ReminderType,
@@ -286,7 +291,7 @@ export async function POST(req: Request) {
           await new sql.Request(transaction)
             .input("EventId", sql.UniqueIdentifier, event.eventId)
             .input("Status", sql.TinyInt, status)
-            .input("CreatedReminderCount", sql.Int, reminders.length)
+            .input("CreatedReminderCount", sql.Int, createdReminderCount)
             .query(`
               UPDATE dbo.ReminderEventInbox
               SET Status = @Status,
@@ -296,7 +301,7 @@ export async function POST(req: Request) {
             `);
 
           await transaction.commit();
-          return {tenant, duplicate: false, status, createdCount: reminders.length, reminders};
+          return {tenant, duplicate: false, status, createdCount: createdReminderCount, reminders};
         } catch (error) {
           await transaction.rollback().catch(() => undefined);
           throw error;
