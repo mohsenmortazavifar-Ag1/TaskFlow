@@ -1,6 +1,6 @@
 # Tenant reminder event rules
 
-Apply `database/tenant/004_reminder_event_cancellation_limits.sql` after the existing tenant reminder-event migrations. Apply `database/006_reminder_schedule_occurrence_count.sql` to the central TaskFlow database before deploying the updated Worker.
+Apply `database/tenant/004_reminder_event_cancellation_limits.sql` after the existing tenant reminder-event migrations. Apply `database/007_reminder_schedule_occurrence_count.sql` to the central TaskFlow database before deploying the updated Worker.
 
 ## Event contracts
 
