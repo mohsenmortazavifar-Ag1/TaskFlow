@@ -1,8 +1,13 @@
 -- Apply once to every tenant operational database after 002_reminder_schedules.sql.
+IF SCHEMA_ID(N'notification') IS NULL EXEC(N'CREATE SCHEMA notification');
+IF OBJECT_ID(N'notification.ReminderEventRules', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderEventRules', N'U') IS NULL
+    EXEC(N'ALTER SCHEMA notification TRANSFER notification.ReminderEventRules');
+IF OBJECT_ID(N'notification.ReminderEventInbox', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderEventInbox', N'U') IS NULL
+    EXEC(N'ALTER SCHEMA notification TRANSFER notification.ReminderEventInbox');
 -- Rules map domain events (for example RepairCompleted) to reminder definitions.
-IF OBJECT_ID('dbo.ReminderEventRules', 'U') IS NULL
+IF OBJECT_ID('notification.ReminderEventRules', 'U') IS NULL
 BEGIN
-    CREATE TABLE dbo.ReminderEventRules
+    CREATE TABLE notification.ReminderEventRules
     (
         ReminderEventRuleId bigint IDENTITY(1,1) NOT NULL
             CONSTRAINT PK_ReminderEventRules PRIMARY KEY,
@@ -34,15 +39,15 @@ BEGIN
     );
 
     CREATE INDEX IX_ReminderEventRules_EventType
-        ON dbo.ReminderEventRules(EventType, IsEnabled)
+        ON notification.ReminderEventRules(EventType, IsEnabled)
         INCLUDE(ReminderType, SourceEntity, DelayMinutes, TimeZoneId);
 END;
 GO
 
 -- Inbox provides idempotency: retrying the same eventId must not create duplicate reminders.
-IF OBJECT_ID('dbo.ReminderEventInbox', 'U') IS NULL
+IF OBJECT_ID('notification.ReminderEventInbox', 'U') IS NULL
 BEGIN
-    CREATE TABLE dbo.ReminderEventInbox
+    CREATE TABLE notification.ReminderEventInbox
     (
         ReminderEventInboxId bigint IDENTITY(1,1) NOT NULL
             CONSTRAINT PK_ReminderEventInbox PRIMARY KEY,
