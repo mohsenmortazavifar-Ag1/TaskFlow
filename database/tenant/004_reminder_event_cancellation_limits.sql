@@ -1,5 +1,6 @@
 -- Apply to every tenant database after 003_reminder_event_rules.sql.
 -- Adds cancellation-event mapping and a finite recurrence limit to event rules.
+-- CancelEventType accepts one event code or a comma-separated list of cancellation event codes.
 IF COL_LENGTH(N'dbo.ReminderEventRules', N'CancelEventType') IS NULL
     ALTER TABLE dbo.ReminderEventRules ADD CancelEventType nvarchar(100) NULL;
 GO
