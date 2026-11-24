@@ -1,8 +1,12 @@
 -- Apply to each tenant database.
 -- Tenant-local definitions are the source of truth. Worker projects these rows into central TaskFlow.
-IF OBJECT_ID('dbo.ReminderSchedules', 'U') IS NULL
+IF SCHEMA_ID(N'notification') IS NULL EXEC(N'CREATE SCHEMA notification');
+IF OBJECT_ID(N'notification.ReminderSchedules', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderSchedules', N'U') IS NULL
+    EXEC(N'ALTER SCHEMA notification TRANSFER notification.ReminderSchedules');
+
+IF OBJECT_ID('notification.ReminderSchedules', 'U') IS NULL
 BEGIN
-    CREATE TABLE dbo.ReminderSchedules
+    CREATE TABLE notification.ReminderSchedules
     (
         ReminderScheduleId bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_TenantReminderSchedules PRIMARY KEY,
         ReminderType nvarchar(100) NOT NULL,
@@ -20,7 +24,7 @@ BEGIN
     );
 
     CREATE INDEX IX_TenantReminderSchedules_Updated
-        ON dbo.ReminderSchedules(UpdatedAt, ReminderScheduleId)
+        ON notification.ReminderSchedules(UpdatedAt, ReminderScheduleId)
         INCLUDE(IsEnabled, NextRunAtUtc, ScheduleVersion);
 END;
 GO
