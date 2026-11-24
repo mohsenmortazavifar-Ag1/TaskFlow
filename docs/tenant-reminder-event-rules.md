@@ -45,4 +45,4 @@ Replace the rule ID and message with the tenant's actual rule and approved text.
 - SMS provider retries happen in the SMS job pipeline; they do not create additional reminder occurrences.
 - `LocalTime` is applied to the first due date after the configured delay and to subsequent recurring dates using `TimeZoneId`.
 - `CancelEventType` accepts one event code or a comma-separated list. A matching cancellation event disables the schedule, clears its next run time and increments `ScheduleVersion`, invalidating queued-but-not-yet-executed occurrences.
-- Rule edits should increment the tenant schedule's `ScheduleVersion` through the reminder API so the central execution cursor and occurrence count are reset intentionally.
+- Changing a row in `ReminderEventRules` affects schedules created by future events; it does not rewrite existing schedules. Edit or cancel an existing schedule through the reminder API, which increments that schedule's `ScheduleVersion` and invalidates older queued occurrences.
