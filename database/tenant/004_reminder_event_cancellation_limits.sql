@@ -1,7 +1,7 @@
 -- Apply to every tenant database after 003_reminder_event_rules.sql.
 IF SCHEMA_ID(N'notification') IS NULL EXEC(N'CREATE SCHEMA notification');
-IF OBJECT_ID(N'notification.ReminderEventRules', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderEventRules', N'U') IS NULL
-    EXEC(N'ALTER SCHEMA notification TRANSFER notification.ReminderEventRules');
+IF OBJECT_ID(N'dbo.ReminderEventRules', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderEventRules', N'U') IS NULL
+    EXEC(N'ALTER SCHEMA notification TRANSFER dbo.ReminderEventRules');
 -- Adds cancellation-event mapping and a finite recurrence limit to event rules.
 -- CancelEventType accepts one event code or a comma-separated list of cancellation event codes.
 IF COL_LENGTH(N'notification.ReminderEventRules', N'CancelEventType') IS NULL
