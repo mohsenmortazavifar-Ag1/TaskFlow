@@ -3,8 +3,8 @@
   Status: 0=Pending, 1=Processing, 2=Published, 3=Dead.
 */
 IF SCHEMA_ID(N'notification') IS NULL EXEC(N'CREATE SCHEMA notification');
-IF OBJECT_ID(N'notification.OutboxMessages', N'U') IS NOT NULL AND OBJECT_ID(N'notification.OutboxMessages', N'U') IS NULL
-    EXEC(N'ALTER SCHEMA notification TRANSFER notification.OutboxMessages');
+IF OBJECT_ID(N'dbo.OutboxMessages', N'U') IS NOT NULL AND OBJECT_ID(N'notification.OutboxMessages', N'U') IS NULL
+    EXEC(N'ALTER SCHEMA notification TRANSFER dbo.OutboxMessages');
 
 IF OBJECT_ID(N'notification.OutboxMessages', N'U') IS NULL
 BEGIN
