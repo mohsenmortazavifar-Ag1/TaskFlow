@@ -174,7 +174,11 @@ export async function POST(req: Request) {
                      ProviderCode, RecurrenceIntervalValue, RecurrenceIntervalUnit, LocalTime,
                      CancelEventType, MaxOccurrences
               FROM dbo.ReminderEventRules WITH (UPDLOCK, HOLDLOCK)
-              WHERE CancelEventType = @CancelEventType
+              WHERE EXISTS (
+                  SELECT 1
+                  FROM STRING_SPLIT(CancelEventType, N',') AS cancelType
+                  WHERE LTRIM(RTRIM(cancelType.value)) = @CancelEventType
+                )
                 AND SourceEntity = @SourceEntity
                 AND IsEnabled = 1
               ORDER BY ReminderEventRuleId;
