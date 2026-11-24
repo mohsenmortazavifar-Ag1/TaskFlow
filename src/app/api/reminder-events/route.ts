@@ -152,6 +152,8 @@ export async function POST(req: Request) {
                 (@EventId, @EventType, @SourceEntity, @SourceEntityId, @OccurredAtUtc, 0);
             `);
 
+          const reminders: ReminderDefinition[] = [];
+
           const cancellationRules = await new sql.Request(transaction)
             .input("CancelEventType", sql.NVarChar(100), event.eventType)
             .input("SourceEntity", sql.NVarChar(100), event.sourceEntity)
@@ -225,8 +227,6 @@ export async function POST(req: Request) {
             sourceEntityId: event.sourceEntityId,
             occurredAtUtc: event.occurredAtUtc
           };
-          const reminders: ReminderDefinition[] = [];
-
           for (const rule of rulesResult.recordset) {
             const mobile = renderTemplate(rule.MobileTemplate, values).trim();
             const message = renderTemplate(rule.MessageTemplate, values).trim();
