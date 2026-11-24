@@ -1,9 +1,9 @@
 -- Apply once to every tenant operational database after 002_reminder_schedules.sql.
 IF SCHEMA_ID(N'notification') IS NULL EXEC(N'CREATE SCHEMA notification');
-IF OBJECT_ID(N'notification.ReminderEventRules', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderEventRules', N'U') IS NULL
-    EXEC(N'ALTER SCHEMA notification TRANSFER notification.ReminderEventRules');
-IF OBJECT_ID(N'notification.ReminderEventInbox', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderEventInbox', N'U') IS NULL
-    EXEC(N'ALTER SCHEMA notification TRANSFER notification.ReminderEventInbox');
+IF OBJECT_ID(N'dbo.ReminderEventRules', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderEventRules', N'U') IS NULL
+    EXEC(N'ALTER SCHEMA notification TRANSFER dbo.ReminderEventRules');
+IF OBJECT_ID(N'dbo.ReminderEventInbox', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderEventInbox', N'U') IS NULL
+    EXEC(N'ALTER SCHEMA notification TRANSFER dbo.ReminderEventInbox');
 -- Rules map domain events (for example RepairCompleted) to reminder definitions.
 IF OBJECT_ID('notification.ReminderEventRules', 'U') IS NULL
 BEGIN
