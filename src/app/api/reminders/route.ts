@@ -55,7 +55,7 @@ export async function GET(req: Request) {
         .query(`
           SELECT TOP (@take) ReminderScheduleId, ReminderType, SourceEntity, SourceEntityId,
                  RuleJson, TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc, CreatedAt, UpdatedAt
-          FROM dbo.ReminderSchedules
+          FROM notification.ReminderSchedules
           ORDER BY UpdatedAt DESC, ReminderScheduleId DESC;
         `);
       return result.recordset;
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
         .input("TimeZoneId", sql.NVarChar(100), b.timeZoneId)
         .input("NextRunAtUtc", sql.DateTime2, new Date(b.nextRunAtUtc))
         .query(`
-          INSERT INTO dbo.ReminderSchedules
+          INSERT INTO notification.ReminderSchedules
             (ReminderType, SourceEntity, SourceEntityId, RuleJson, TimeZoneId,
              ScheduleVersion, IsEnabled, NextRunAtUtc, CreatedAt, UpdatedAt)
           OUTPUT INSERTED.ReminderScheduleId, INSERTED.ReminderType, INSERTED.SourceEntity,
