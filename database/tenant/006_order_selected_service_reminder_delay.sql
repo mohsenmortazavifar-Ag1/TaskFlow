@@ -29,6 +29,7 @@ GO
 -- supplied by Repair as serviceReminderIntervalMonths (3, 6, or 12).
 UPDATE notification.ReminderEventRules
 SET DelayMinutes = 0,
+    MessageTemplate = N'سلام {{customerName}} عزیز، زمان سرویس دوره‌ای دستگاه شما فرا رسیده است. دستگاه: {{deviceType}} {{brand}} {{model}}، شماره رسید: {{repairOrderNumber}}. برای هماهنگی با ما تماس بگیرید.',
     DelayDataKey = N'serviceReminderIntervalMonths',
     DelayUnit = N'month',
     RecurrenceIntervalValue = NULL,
