@@ -10,16 +10,24 @@ IF SCHEMA_ID(N'notification') IS NULL
 
 IF OBJECT_ID(N'dbo.OutboxMessages', N'U') IS NOT NULL
    AND OBJECT_ID(N'notification.OutboxMessages', N'U') IS NOT NULL
-    THROW 51010, 'Both dbo.OutboxMessages and notification.OutboxMessages exist. Reconcile them before migration.', 1;
+BEGIN
+    ;THROW 51010, 'Both dbo.OutboxMessages and notification.OutboxMessages exist. Reconcile them before migration.', 1;
+END;
 IF OBJECT_ID(N'dbo.ReminderSchedules', N'U') IS NOT NULL
    AND OBJECT_ID(N'notification.ReminderSchedules', N'U') IS NOT NULL
-    THROW 51011, 'Both dbo.ReminderSchedules and notification.ReminderSchedules exist. Reconcile them before migration.', 1;
+BEGIN
+    ;THROW 51011, 'Both dbo.ReminderSchedules and notification.ReminderSchedules exist. Reconcile them before migration.', 1;
+END;
 IF OBJECT_ID(N'dbo.ReminderEventRules', N'U') IS NOT NULL
    AND OBJECT_ID(N'notification.ReminderEventRules', N'U') IS NOT NULL
-    THROW 51012, 'Both dbo.ReminderEventRules and notification.ReminderEventRules exist. Reconcile them before migration.', 1;
+BEGIN
+    ;THROW 51012, 'Both dbo.ReminderEventRules and notification.ReminderEventRules exist. Reconcile them before migration.', 1;
+END;
 IF OBJECT_ID(N'dbo.ReminderEventInbox', N'U') IS NOT NULL
    AND OBJECT_ID(N'notification.ReminderEventInbox', N'U') IS NOT NULL
-    THROW 51013, 'Both dbo.ReminderEventInbox and notification.ReminderEventInbox exist. Reconcile them before migration.', 1;
+BEGIN
+    ;THROW 51013, 'Both dbo.ReminderEventInbox and notification.ReminderEventInbox exist. Reconcile them before migration.', 1;
+END;
 
 IF OBJECT_ID(N'dbo.OutboxMessages', N'U') IS NOT NULL
     EXEC(N'ALTER SCHEMA notification TRANSFER dbo.OutboxMessages');
