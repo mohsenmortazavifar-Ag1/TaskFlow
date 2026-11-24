@@ -28,10 +28,46 @@ public sealed class SendSmsHandler(
             !idElement.TryGetInt64(out var smsMessageId) || smsMessageId <= 0)
             throw new InvalidOperationException("SendSms payload must contain a positive smsMessageId.");
 
+        long? reminderOccurrenceId = null;
+        if (payload.RootElement.TryGetProperty("reminderOccurrenceId", out var occurrenceNode))
+        {
+            if (!occurrenceNode.TryGetInt64(out var parsedOccurrenceId) || parsedOccurrenceId <= 0)
+                throw new InvalidOperationException("SendSms reminderOccurrenceId must be a positive integer when supplied.");
+            reminderOccurrenceId = parsedOccurrenceId;
+        }
+
         var tenantId = job.TenantId
             ?? throw new InvalidOperationException("SMS jobs require TenantId.");
 
         await using var connection = await jobs.OpenConnectionAsync(cancellationToken);
+
+        // A reminder can be cancelled after its ExecuteReminder job created the SMS job.
+        // Recheck the schedule immediately before claiming the SMS for provider submission.
+        if (reminderOccurrenceId.HasValue)
+        {
+            await using var reminderCheck = new SqlCommand("""
+                SELECT CASE WHEN EXISTS
+                (
+                    SELECT 1
+                    FROM dbo.ReminderOccurrences o
+                    INNER JOIN dbo.ReminderSchedules s
+                        ON s.ReminderScheduleId = o.ReminderScheduleId
+                    WHERE o.ReminderOccurrenceId = @OccurrenceId
+                      AND o.Status = 2
+                      AND o.ScheduleVersion = s.ScheduleVersion
+                      AND s.IsEnabled = 1
+                ) THEN 1 ELSE 0 END;
+                """, connection);
+            reminderCheck.Parameters.Add("@OccurrenceId", SqlDbType.BigInt).Value = reminderOccurrenceId.Value;
+            if (Convert.ToInt32(await reminderCheck.ExecuteScalarAsync(cancellationToken)) != 1)
+            {
+                logger.LogInformation(
+                    "Skipping SMS message {SmsMessageId}: reminder occurrence {OccurrenceId} was cancelled or superseded before submission.",
+                    smsMessageId, reminderOccurrenceId.Value);
+                return;
+            }
+        }
+
         await using var read = new SqlCommand("""
             SELECT m.SmsMessageId, m.TenantId, m.Mobile, m.Message,
                    s.ProviderCode, s.SenderNumber, s.IsEnabled, m.SubmissionState
@@ -86,13 +122,35 @@ public sealed class SendSmsHandler(
                 LastError = NULL
             WHERE SmsMessageId = @SmsMessageId
               AND TenantId = @TenantId
-              AND SubmissionState = 0;
+              AND SubmissionState = 0
+              AND
+              (
+                  @ReminderOccurrenceId IS NULL
+                  OR EXISTS
+                  (
+                      SELECT 1
+                      FROM dbo.ReminderOccurrences o WITH (UPDLOCK, HOLDLOCK)
+                      INNER JOIN dbo.ReminderSchedules s WITH (UPDLOCK, HOLDLOCK)
+                          ON s.ReminderScheduleId = o.ReminderScheduleId
+                      WHERE o.ReminderOccurrenceId = @ReminderOccurrenceId
+                        AND o.Status = 2
+                        AND o.ScheduleVersion = s.ScheduleVersion
+                        AND s.IsEnabled = 1
+                  )
+              );
             """, connection))
         {
             claim.Parameters.Add("@SmsMessageId", SqlDbType.BigInt).Value = sms.SmsMessageId;
             claim.Parameters.Add("@TenantId", SqlDbType.BigInt).Value = sms.TenantId;
+            claim.Parameters.Add("@ReminderOccurrenceId", SqlDbType.BigInt).Value =
+                (object?)reminderOccurrenceId ?? DBNull.Value;
             if (await claim.ExecuteNonQueryAsync(cancellationToken) != 1)
+            {
+                logger.LogInformation(
+                    "Skipping SMS message {SmsMessageId}: it could not be claimed, or its reminder was cancelled.",
+                    smsMessageId);
                 return;
+            }
         }
 
         SmsSendResult result;
