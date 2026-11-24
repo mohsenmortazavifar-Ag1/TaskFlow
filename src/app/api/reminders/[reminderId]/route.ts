@@ -70,7 +70,7 @@ export async function PATCH(req: Request, context: {params: Promise<{reminderId:
           .query(`
             SELECT ReminderScheduleId, ReminderType, SourceEntity, SourceEntityId, RuleJson,
                    TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc
-            FROM dbo.ReminderSchedules WITH (UPDLOCK, HOLDLOCK)
+            FROM notification.ReminderSchedules WITH (UPDLOCK, HOLDLOCK)
             WHERE ReminderScheduleId = @ReminderScheduleId;
           `);
         const current = currentResult.recordset[0];
@@ -97,7 +97,7 @@ export async function PATCH(req: Request, context: {params: Promise<{reminderId:
           .input("NextRunAtUtc", sql.DateTime2, values.nextRunAtUtc)
           .input("ScheduleVersion", sql.Int, values.scheduleVersion)
           .query(`
-            UPDATE dbo.ReminderSchedules
+            UPDATE notification.ReminderSchedules
             SET ReminderType = @ReminderType, SourceEntity = @SourceEntity,
                 SourceEntityId = @SourceEntityId, RuleJson = @RuleJson,
                 TimeZoneId = @TimeZoneId, NextRunAtUtc = @NextRunAtUtc,
@@ -174,7 +174,7 @@ export async function DELETE(req: Request, context: {params: Promise<{reminderId
           .query(`
             SELECT ReminderScheduleId, ReminderType, SourceEntity, SourceEntityId, RuleJson,
                    TimeZoneId, ScheduleVersion, IsEnabled
-            FROM dbo.ReminderSchedules WITH (UPDLOCK, HOLDLOCK)
+            FROM notification.ReminderSchedules WITH (UPDLOCK, HOLDLOCK)
             WHERE ReminderScheduleId = @ReminderScheduleId;
           `);
         const current = result.recordset[0];
@@ -185,7 +185,7 @@ export async function DELETE(req: Request, context: {params: Promise<{reminderId
           .input("ReminderScheduleId", sql.BigInt, reminderId)
           .input("ScheduleVersion", sql.Int, current.ScheduleVersion + 1)
           .query(`
-            UPDATE dbo.ReminderSchedules
+            UPDATE notification.ReminderSchedules
             SET IsEnabled = 0, NextRunAtUtc = NULL,
                 ScheduleVersion = @ScheduleVersion, UpdatedAt = SYSUTCDATETIME()
             OUTPUT INSERTED.ReminderScheduleId, INSERTED.ReminderType, INSERTED.SourceEntity,
