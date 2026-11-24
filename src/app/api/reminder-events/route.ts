@@ -53,7 +53,7 @@ function calculateInitialDueAt(
   const delayed = new Date(new Date(occurredAtUtc).getTime() + delayMinutes * 60_000);
   if (!Number.isFinite(delayed.getTime())) throw new Error("EVENT_INVALID_OCCURRED_AT");
   if (!localTime) return delayed;
-  if (!/^(?:[01]\d|2[0-3]):[0-5]\\d$/.test(localTime))
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(localTime))
     throw new Error("EVENT_INVALID_LOCAL_TIME");
 
   let formatter: Intl.DateTimeFormat;
