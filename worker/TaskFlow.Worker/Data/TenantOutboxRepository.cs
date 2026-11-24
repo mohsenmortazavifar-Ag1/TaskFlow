@@ -10,7 +10,7 @@ public sealed class TenantOutboxRepository
         SqlConnection connection, string workerId, int batchSize, int leaseSeconds, CancellationToken ct)
     {
         await using var command = new SqlCommand("""
-            UPDATE dbo.OutboxMessages
+            UPDATE notification.OutboxMessages
                SET Status = 3,
                    LastError = COALESCE(LastError, N'Maximum attempts reached after lease expiry.'),
                    LockedBy = NULL, LockedUntil = NULL
@@ -20,7 +20,7 @@ public sealed class TenantOutboxRepository
             ;WITH candidates AS
             (
                 SELECT TOP (@BatchSize) *
-                FROM dbo.OutboxMessages WITH (UPDLOCK, READPAST, ROWLOCK)
+                FROM notification.OutboxMessages WITH (UPDLOCK, READPAST, ROWLOCK)
                 WHERE Status IN (0, 1)
                   AND (NextAttemptAt IS NULL OR NextAttemptAt <= SYSUTCDATETIME())
                   AND (Status = 0 OR LockedUntil IS NULL OR LockedUntil < SYSUTCDATETIME())
@@ -52,7 +52,7 @@ public sealed class TenantOutboxRepository
     public async Task MarkPublishedAsync(SqlConnection connection, long outboxId, string workerId, CancellationToken ct)
     {
         await using var command = new SqlCommand("""
-            UPDATE dbo.OutboxMessages
+            UPDATE notification.OutboxMessages
                SET Status = 2, ProcessedAt = SYSUTCDATETIME(),
                    LockedBy = NULL, LockedUntil = NULL, LastError = NULL
              WHERE OutboxId = @OutboxId AND Status = 1 AND LockedBy = @WorkerId;
@@ -70,7 +70,7 @@ public sealed class TenantOutboxRepository
         if (errorText.Length > 2000) errorText = errorText[..2000];
 
         await using var command = new SqlCommand("""
-            UPDATE dbo.OutboxMessages
+            UPDATE notification.OutboxMessages
                SET Status = CASE WHEN AttemptCount >= MaxAttempts THEN 3 ELSE 0 END,
                    NextAttemptAt = CASE
                        WHEN AttemptCount >= MaxAttempts THEN NULL
