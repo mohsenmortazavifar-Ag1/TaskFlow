@@ -19,4 +19,4 @@ public sealed record ReminderRule(
     int? IntervalValue,
     string? IntervalUnit,
     string? LocalTime,
-    int? MaxOccurrences);
+    int? MaxOccurrences = null);
