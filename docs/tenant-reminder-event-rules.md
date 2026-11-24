@@ -1,6 +1,6 @@
 # Tenant reminder event rules
 
-Apply `database/tenant/004_reminder_event_cancellation_limits.sql` after the existing tenant reminder-event migrations. Apply `database/007_reminder_schedule_occurrence_count.sql` to the central TaskFlow database before deploying the updated Worker.
+Apply `database/tenant/005_move_reminder_tables_to_notification.sql` to every tenant database to migrate legacy `dbo` tables. The tenant outbox, reminder schedules, event rules and event inbox are stored in the `notification` schema. For a fresh tenant, run the tenant migrations in order; they create these tables directly in `notification`. Apply `database/007_reminder_schedule_occurrence_count.sql` to the central TaskFlow database before deploying the updated Worker.
 
 ## Event contracts
 
@@ -19,7 +19,7 @@ All events identify the source as `RepairOrder` and use the RepairOrderId as `So
 This is an example only; choose the actual delay, recurrence, local time and limit for each tenant. The current recurrence model supports a uniform interval (for example every 1 day), not a non-uniform sequence such as day 1, 3 and 7.
 
 ```sql
-UPDATE dbo.ReminderEventRules
+UPDATE notification.ReminderEventRules
 SET EventType = N'ReadyForDelivery',
     ReminderType = N'PickupReminder',
     SourceEntity = N'RepairOrder',
