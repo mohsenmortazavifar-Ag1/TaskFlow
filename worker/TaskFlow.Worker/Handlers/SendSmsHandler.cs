@@ -61,6 +61,8 @@ public sealed class SendSmsHandler(
             reminderCheck.Parameters.Add("@OccurrenceId", SqlDbType.BigInt).Value = reminderOccurrenceId.Value;
             if (Convert.ToInt32(await reminderCheck.ExecuteScalarAsync(cancellationToken)) != 1)
             {
+                await MarkReminderSmsCancelledAsync(
+                    connection, smsMessageId, tenantId, reminderOccurrenceId.Value, cancellationToken);
                 logger.LogInformation(
                     "Skipping SMS message {SmsMessageId}: reminder occurrence {OccurrenceId} was cancelled or superseded before submission.",
                     smsMessageId, reminderOccurrenceId.Value);
@@ -146,6 +148,9 @@ public sealed class SendSmsHandler(
                 (object?)reminderOccurrenceId ?? DBNull.Value;
             if (await claim.ExecuteNonQueryAsync(cancellationToken) != 1)
             {
+                if (reminderOccurrenceId.HasValue)
+                    await MarkReminderSmsCancelledAsync(
+                        connection, smsMessageId, tenantId, reminderOccurrenceId.Value, cancellationToken);
                 logger.LogInformation(
                     "Skipping SMS message {SmsMessageId}: it could not be claimed, or its reminder was cancelled.",
                     smsMessageId);
@@ -226,6 +231,64 @@ public sealed class SendSmsHandler(
             update.Parameters.Add("@FirstCheckDelaySeconds", SqlDbType.Int).Value = firstCheckDelay;
             update.Parameters.Add("@Description", SqlDbType.NVarChar, 1000).Value = acceptedDescription;
             await update.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    private static async Task MarkReminderSmsCancelledAsync(
+        SqlConnection connection,
+        long smsMessageId,
+        long tenantId,
+        long reminderOccurrenceId,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            long? cancelledMessageId = null;
+            string? providerCode = null;
+            await using (var update = new SqlCommand("""
+                UPDATE dbo.SmsMessages
+                SET LastError = N'Reminder schedule was cancelled before provider submission.'
+                OUTPUT INSERTED.SmsMessageId, INSERTED.ProviderCode
+                WHERE SmsMessageId = @SmsMessageId
+                  AND TenantId = @TenantId
+                  AND SubmissionState = 0
+                  AND AcceptedAt IS NULL;
+                """, connection, transaction))
+            {
+                update.Parameters.Add("@SmsMessageId", SqlDbType.BigInt).Value = smsMessageId;
+                update.Parameters.Add("@TenantId", SqlDbType.BigInt).Value = tenantId;
+                await using var reader = await update.ExecuteReaderAsync(cancellationToken);
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    cancelledMessageId = reader.GetInt64(0);
+                    providerCode = reader.IsDBNull(1) ? null : reader.GetString(1);
+                }
+            }
+
+            if (cancelledMessageId.HasValue)
+            {
+                await using var log = new SqlCommand("""
+                    INSERT INTO dbo.SmsLogs
+                        (SmsMessageId, ProviderCode, EventType, Description)
+                    VALUES
+                        (@SmsMessageId, @ProviderCode, N'ReminderCancelled',
+                         @Description);
+                    """, connection, transaction);
+                log.Parameters.Add("@SmsMessageId", SqlDbType.BigInt).Value = cancelledMessageId.Value;
+                log.Parameters.Add("@ProviderCode", SqlDbType.NVarChar, 100).Value =
+                    (object?)providerCode ?? DBNull.Value;
+                log.Parameters.Add("@Description", SqlDbType.NVarChar, 1000).Value =
+                    $"Reminder occurrence {reminderOccurrenceId} was cancelled before SMS submission.";
+                await log.ExecuteNonQueryAsync(cancellationToken);
+            }
+
             await transaction.CommitAsync(cancellationToken);
         }
         catch
