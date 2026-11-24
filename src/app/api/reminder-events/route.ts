@@ -32,6 +32,8 @@ type EventRule = {
   RecurrenceIntervalValue: number | null;
   RecurrenceIntervalUnit: "day" | "month" | "year" | null;
   LocalTime: string | null;
+  CancelEventType: string | null;
+  MaxOccurrences: number | null;
 };
 
 function renderTemplate(template: string, values: Record<string, string>): string {
@@ -39,6 +41,55 @@ function renderTemplate(template: string, values: Record<string, string>): strin
     if (!(key in values)) throw new Error(`EVENT_MISSING_TEMPLATE_VALUE:${key}`);
     return values[key];
   });
+}
+
+
+function calculateInitialDueAt(
+  occurredAtUtc: string,
+  delayMinutes: number,
+  timeZoneId: string,
+  localTime: string | null
+): Date {
+  const delayed = new Date(new Date(occurredAtUtc).getTime() + delayMinutes * 60_000);
+  if (!localTime) return delayed;
+
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timeZoneId, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+    });
+    formatter.format(delayed);
+  } catch {
+    throw new Error("EVENT_INVALID_TIME_ZONE");
+  }
+
+  const parts = formatter.formatToParts(delayed);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(x => x.type === type)?.value ?? "";
+  const year = Number(part("year"));
+  const month = Number(part("month"));
+  const day = Number(part("day"));
+  const [hour, minute] = localTime.split(":").map(Number);
+  const targetUtcLike = Date.UTC(year, month - 1, day, hour, minute, 0);
+  let candidate = targetUtcLike;
+
+  for (let i = 0; i < 4; i++) {
+    const probe = formatter.formatToParts(new Date(candidate));
+    const value = (type: Intl.DateTimeFormatPartTypes) => Number(probe.find(x => x.type === type)?.value ?? 0);
+    const represented = Date.UTC(value("year"), value("month") - 1, value("day"),
+      value("hour"), value("minute"), value("second"));
+    candidate += targetUtcLike - represented;
+  }
+
+  const resolved = new Date(candidate);
+  const check = formatter.formatToParts(resolved);
+  const get = (type: Intl.DateTimeFormatPartTypes) => check.find(x => x.type === type)?.value;
+  if (Number(get("year")) !== year || Number(get("month")) !== month ||
+      Number(get("day")) !== day || Number(get("hour")) !== hour ||
+      Number(get("minute")) !== minute) {
+    throw new Error("EVENT_LOCAL_TIME_INVALID_FOR_TIME_ZONE");
+  }
+  return resolved;
 }
 
 function errorResponse(error: unknown) {
@@ -101,14 +152,68 @@ export async function POST(req: Request) {
                 (@EventId, @EventType, @SourceEntity, @SourceEntityId, @OccurredAtUtc, 0);
             `);
 
-          const rulesResult = await new sql.Request(transaction)
-            .input("EventType", sql.NVarChar(100), event.eventType)
+          const cancellationRules = await new sql.Request(transaction)
+            .input("CancelEventType", sql.NVarChar(100), event.eventType)
+            .input("SourceEntity", sql.NVarChar(100), event.sourceEntity)
             .query<EventRule>(`
               SELECT ReminderEventRuleId, EventType, ReminderType, SourceEntity,
                      DelayMinutes, TimeZoneId, MobileTemplate, MessageTemplate,
-                     ProviderCode, RecurrenceIntervalValue, RecurrenceIntervalUnit, LocalTime
+                     ProviderCode, RecurrenceIntervalValue, RecurrenceIntervalUnit, LocalTime,
+                     CancelEventType, MaxOccurrences
               FROM dbo.ReminderEventRules WITH (UPDLOCK, HOLDLOCK)
-              WHERE EventType = @EventType AND IsEnabled = 1
+              WHERE CancelEventType = @CancelEventType
+                AND SourceEntity = @SourceEntity
+                AND IsEnabled = 1
+              ORDER BY ReminderEventRuleId;
+            `);
+
+          for (const cancelRule of cancellationRules.recordset) {
+            const cancelled = await new sql.Request(transaction)
+              .input("SourceEntity", sql.NVarChar(100), event.sourceEntity)
+              .input("SourceEntityId", sql.BigInt, event.sourceEntityId)
+              .input("ReminderType", sql.NVarChar(100), cancelRule.ReminderType)
+              .query(`
+                UPDATE dbo.ReminderSchedules
+                SET IsEnabled = 0, NextRunAtUtc = NULL,
+                    ScheduleVersion = ScheduleVersion + 1,
+                    UpdatedAt = SYSUTCDATETIME()
+                OUTPUT INSERTED.ReminderScheduleId, INSERTED.ReminderType,
+                       INSERTED.SourceEntity, INSERTED.SourceEntityId, INSERTED.RuleJson,
+                       INSERTED.TimeZoneId, INSERTED.ScheduleVersion, INSERTED.IsEnabled,
+                       INSERTED.NextRunAtUtc, INSERTED.UpdatedAt
+                WHERE SourceEntity = @SourceEntity
+                  AND SourceEntityId = @SourceEntityId
+                  AND ReminderType = @ReminderType
+                  AND IsEnabled = 1;
+              `);
+            for (const row of cancelled.recordset) {
+              reminders.push({
+                reminderScheduleId: row.ReminderScheduleId,
+                reminderType: row.ReminderType,
+                sourceEntity: row.SourceEntity,
+                sourceEntityId: row.SourceEntityId,
+                ruleJson: row.RuleJson,
+                timeZoneId: row.TimeZoneId,
+                scheduleVersion: row.ScheduleVersion,
+                isEnabled: row.IsEnabled,
+                nextRunAtUtc: row.NextRunAtUtc,
+                updatedAt: row.UpdatedAt
+              });
+            }
+          }
+
+          const rulesResult = await new sql.Request(transaction)
+            .input("EventType", sql.NVarChar(100), event.eventType)
+            .input("SourceEntity", sql.NVarChar(100), event.sourceEntity)
+            .query<EventRule>(`
+              SELECT ReminderEventRuleId, EventType, ReminderType, SourceEntity,
+                     DelayMinutes, TimeZoneId, MobileTemplate, MessageTemplate,
+                     ProviderCode, RecurrenceIntervalValue, RecurrenceIntervalUnit, LocalTime,
+                     CancelEventType, MaxOccurrences
+              FROM dbo.ReminderEventRules WITH (UPDLOCK, HOLDLOCK)
+              WHERE EventType = @EventType
+                AND SourceEntity = @SourceEntity
+                AND IsEnabled = 1
               ORDER BY ReminderEventRuleId;
             `);
 
@@ -128,7 +233,9 @@ export async function POST(req: Request) {
             if (!mobile || mobile.length > 20) throw new Error("EVENT_INVALID_RENDERED_MOBILE");
             if (!message || message.length > 2000) throw new Error("EVENT_INVALID_RENDERED_MESSAGE");
 
-            const dueAt = new Date(new Date(event.occurredAtUtc).getTime() + rule.DelayMinutes * 60_000);
+            const dueAt = calculateInitialDueAt(
+              event.occurredAtUtc, rule.DelayMinutes, rule.TimeZoneId, rule.LocalTime
+            );
             const ruleJson = {
               mobile,
               message,
@@ -136,7 +243,8 @@ export async function POST(req: Request) {
               ...(rule.RecurrenceIntervalValue && rule.RecurrenceIntervalUnit
                 ? {intervalValue: rule.RecurrenceIntervalValue, intervalUnit: rule.RecurrenceIntervalUnit}
                 : {}),
-              ...(rule.LocalTime ? {localTime: rule.LocalTime} : {})
+              ...(rule.LocalTime ? {localTime: rule.LocalTime} : {}),
+              ...(rule.MaxOccurrences ? {maxOccurrences: rule.MaxOccurrences} : {})
             };
 
             const inserted = await new sql.Request(transaction)
