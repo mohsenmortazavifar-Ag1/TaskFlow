@@ -132,7 +132,7 @@ public sealed class TenantReminderSyncService(
         await using (var read = new SqlCommand("""
             SELECT ReminderScheduleId, ReminderType, SourceEntity, SourceEntityId,
                    RuleJson, TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc, UpdatedAt
-            FROM dbo.ReminderSchedules
+            FROM notification.ReminderSchedules
             ORDER BY UpdatedAt, ReminderScheduleId;
             """, source) { CommandTimeout = 30 })
         {
