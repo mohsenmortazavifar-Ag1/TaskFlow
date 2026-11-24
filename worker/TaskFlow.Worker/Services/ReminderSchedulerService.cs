@@ -74,7 +74,7 @@ public sealed class ReminderSchedulerService(
             await using (var select = new SqlCommand("""
                 SELECT TOP (@BatchSize)
                     ReminderScheduleId, TenantId, ReminderType, SourceEntity, SourceEntityId,
-                    RuleJson, TimeZoneId, ScheduleVersion, NextRunAtUtc
+                    RuleJson, TimeZoneId, ScheduleVersion, NextRunAtUtc, OccurrenceCount
                 FROM dbo.ReminderSchedules WITH (UPDLOCK, READPAST, ROWLOCK)
                 WHERE IsEnabled = 1
                   AND NextRunAtUtc IS NOT NULL
@@ -88,7 +88,7 @@ public sealed class ReminderSchedulerService(
                     due.Add(new DueReminderSchedule(
                         reader.GetInt64(0), reader.GetInt64(1), reader.GetString(2),
                         reader.GetString(3), reader.GetInt64(4), reader.GetString(5),
-                        reader.GetString(6), reader.GetInt32(7), reader.GetDateTime(8)));
+                        reader.GetString(6), reader.GetInt32(7), reader.GetDateTime(8), reader.GetInt32(9)));
             }
 
             foreach (var schedule in due)
@@ -123,10 +123,14 @@ public sealed class ReminderSchedulerService(
                     await link.ExecuteNonQueryAsync(ct);
                 }
 
-                var nextRun = CalculateNextRun(schedule, rule);
+                var nextRun = rule.MaxOccurrences.HasValue &&
+                    schedule.OccurrenceCount + 1 >= rule.MaxOccurrences.Value
+                    ? null
+                    : CalculateNextRun(schedule, rule);
                 await using var advance = new SqlCommand("""
                     UPDATE dbo.ReminderSchedules
                     SET NextRunAtUtc = @NextRunAtUtc,
+                        OccurrenceCount = OccurrenceCount + 1,
                         UpdatedAt = SYSUTCDATETIME()
                     WHERE ReminderScheduleId = @ScheduleId
                       AND ScheduleVersion = @ScheduleVersion
@@ -176,6 +180,8 @@ public sealed class ReminderSchedulerService(
             ? value : null;
         var intervalUnit = root.TryGetProperty("intervalUnit", out var unitNode) ? unitNode.GetString() : null;
         var localTime = root.TryGetProperty("localTime", out var timeNode) ? timeNode.GetString() : null;
+        int? maxOccurrences = root.TryGetProperty("maxOccurrences", out var maxNode) && maxNode.TryGetInt32(out var max)
+            ? max : null;
 
         if (string.IsNullOrWhiteSpace(mobile) || mobile.Length > 20)
             throw new InvalidOperationException("Reminder RuleJson requires a mobile value (maximum 20 characters).");
@@ -187,11 +193,13 @@ public sealed class ReminderSchedulerService(
             throw new InvalidOperationException("Reminder recurrence must use intervalValue 1..3650 and intervalUnit day, month or year.");
         if (!intervalValue.HasValue && intervalUnit is not null)
             throw new InvalidOperationException("intervalUnit cannot be supplied without intervalValue.");
+        if (maxOccurrences.HasValue && (maxOccurrences.Value < 1 || maxOccurrences.Value > 1000))
+            throw new InvalidOperationException("maxOccurrences must be between 1 and 1000.");
         if (localTime is not null &&
             !TimeOnly.TryParseExact(localTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
             throw new InvalidOperationException("Reminder localTime must use HH:mm format.");
 
-        return new ReminderRule(mobile!, message!, provider, intervalValue, intervalUnit, localTime);
+        return new ReminderRule(mobile!, message!, provider, intervalValue, intervalUnit, localTime, maxOccurrences);
     }
 
     private static DateTime? CalculateNextRun(DueReminderSchedule schedule, ReminderRule rule)
