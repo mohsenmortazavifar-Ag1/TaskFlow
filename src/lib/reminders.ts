@@ -44,6 +44,7 @@ export async function syncReminderProjection(
           RuleJson = @RuleJson,
           TimeZoneId = @TimeZoneId,
           ScheduleVersion = @ScheduleVersion,
+          OccurrenceCount = CASE WHEN ScheduleVersion <> @ScheduleVersion THEN 0 ELSE OccurrenceCount END,
           IsEnabled = @IsEnabled,
           NextRunAtUtc = @NextRunAtUtc,
           SourceUpdatedAt = @SourceUpdatedAt,
@@ -55,11 +56,11 @@ export async function syncReminderProjection(
       BEGIN
         INSERT INTO dbo.ReminderSchedules
           (TenantId, ReminderType, SourceEntity, SourceEntityId, RuleJson,
-           TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc,
+           TimeZoneId, ScheduleVersion, IsEnabled, NextRunAtUtc, OccurrenceCount,
            TenantDatabaseId, TenantReminderScheduleId, SourceUpdatedAt)
         VALUES
           (@TenantId, @ReminderType, @SourceEntity, @SourceEntityId, @RuleJson,
-           @TimeZoneId, @ScheduleVersion, @IsEnabled, @NextRunAtUtc,
+           @TimeZoneId, @ScheduleVersion, @IsEnabled, @NextRunAtUtc, 0,
            @TenantDatabaseId, @TenantReminderScheduleId, @SourceUpdatedAt);
       END;
 
