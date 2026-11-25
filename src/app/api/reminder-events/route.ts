@@ -282,7 +282,7 @@ export async function POST(req: Request) {
             .input("SourceEntity", sql.NVarChar(100), event.sourceEntity)
             .query<EventRule>(`
               SELECT ReminderEventRuleId, EventType, ReminderType, SourceEntity,
-                     DelayMinutes, TimeZoneId, MobileTemplate, MessageTemplate,
+                     DelayMinutes, DelayDataKey, DelayUnit, TimeZoneId, MobileTemplate, MessageTemplate,
                      ProviderCode, RecurrenceIntervalValue, RecurrenceIntervalUnit, LocalTime,
                      CancelEventType, MaxOccurrences
               FROM notification.ReminderEventRules WITH (UPDLOCK, HOLDLOCK)
