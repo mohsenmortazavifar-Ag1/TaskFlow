@@ -2,7 +2,6 @@ import {NextResponse} from "next/server";
 import {z} from "zod";
 import {hasValidApiKey} from "@/lib/auth";
 import {sql} from "@/lib/db";
-import {getCentralReminderCursor, syncReminderProjection} from "@/lib/reminders";
 import {TenantDatabaseError, withTenantDatabase} from "@/lib/tenant-db";
 
 export const runtime = "nodejs";
@@ -59,9 +58,6 @@ export async function PATCH(req: Request, context: {params: Promise<{reminderId:
   const b = parsed.data;
   try {
     const updated = await withTenantDatabase(b.tenantId, b.tenantDatabaseId, async (pool, tenant) => {
-      const centralCursor = b.nextRunAtUtc
-        ? {exists: true, nextRunAtUtc: new Date(b.nextRunAtUtc)}
-        : await getCentralReminderCursor(tenant, reminderId);
       const transaction = new sql.Transaction(pool);
       await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
       try {
@@ -83,7 +79,7 @@ export async function PATCH(req: Request, context: {params: Promise<{reminderId:
           sourceEntityId: b.sourceEntityId ?? current.SourceEntityId,
           ruleJson: b.rule ? JSON.stringify(b.rule) : current.RuleJson,
           timeZoneId: b.timeZoneId ?? current.TimeZoneId,
-          nextRunAtUtc: centralCursor.exists ? centralCursor.nextRunAtUtc : current.NextRunAtUtc,
+          nextRunAtUtc: b.nextRunAtUtc ? new Date(b.nextRunAtUtc) : current.NextRunAtUtc,
           scheduleVersion: current.ScheduleVersion + 1
         };
 
@@ -131,15 +127,7 @@ export async function PATCH(req: Request, context: {params: Promise<{reminderId:
       }
     });
 
-    try {
-      await syncReminderProjection(updated.tenant, updated.reminder);
-      return NextResponse.json({data: updated.reminder});
-    } catch {
-      return NextResponse.json({
-        data: updated.reminder,
-        warning: "تغییر در دیتابیس Tenant ذخیره شد؛ همگام‌سازی مرکزی در چرخه بعدی Worker انجام می‌شود."
-      }, {status: 202});
-    }
+    return NextResponse.json({data: updated.reminder});
   } catch (error) {
     return errorResponse(error);
   }
@@ -217,16 +205,7 @@ export async function DELETE(req: Request, context: {params: Promise<{reminderId
       }
     });
 
-    try {
-      await syncReminderProjection(cancelled.tenant, cancelled.reminder);
-      return NextResponse.json({data: cancelled.reminder, cancelled: true});
-    } catch {
-      return NextResponse.json({
-        data: cancelled.reminder,
-        cancelled: true,
-        warning: "لغو در دیتابیس Tenant ذخیره شد؛ همگام‌سازی مرکزی در چرخه بعدی Worker انجام می‌شود."
-      }, {status: 202});
-    }
+    return NextResponse.json({data: cancelled.reminder, cancelled: true});
   } catch (error) {
     return errorResponse(error);
   }

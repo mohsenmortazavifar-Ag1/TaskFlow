@@ -2,7 +2,6 @@ import {NextResponse} from "next/server";
 import {z} from "zod";
 import {hasValidApiKey} from "@/lib/auth";
 import {sql} from "@/lib/db";
-import {syncReminderProjection} from "@/lib/reminders";
 import {TenantDatabaseError, withTenantDatabase} from "@/lib/tenant-db";
 
 export const runtime = "nodejs";
@@ -113,15 +112,7 @@ export async function POST(req: Request) {
       };
     });
 
-    try {
-      await syncReminderProjection(created.tenant, created.reminder);
-      return NextResponse.json({data: created.reminder}, {status: 201});
-    } catch {
-      return NextResponse.json({
-        data: created.reminder,
-        warning: "Reminder در دیتابیس Tenant ذخیره شد؛ همگام‌سازی مرکزی در چرخه بعدی Worker انجام می‌شود."
-      }, {status: 202});
-    }
+    return NextResponse.json({data: created.reminder}, {status: 201});
   } catch (error) {
     return errorResponse(error);
   }
