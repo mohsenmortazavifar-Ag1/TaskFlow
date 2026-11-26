@@ -53,15 +53,16 @@ public sealed class CentralJobPublisher(SqlConnectionFactory centralConnections)
                     ? providerNode.GetString() : null;
 
                 await using var insertSms = new SqlCommand("""
-                    INSERT INTO dbo.SmsMessages(TenantId, Mobile, Message, ProviderCode, Status)
+                    INSERT INTO dbo.SmsMessages(TenantId, Mobile, Message, ProviderCode, Status, IdempotencyKey)
                     OUTPUT INSERTED.SmsMessageId
-                    VALUES(@TenantId, @Mobile, @Message, @ProviderCode, 0);
+                    VALUES(@TenantId, @Mobile, @Message, @ProviderCode, 0, @IdempotencyKey);
                     """, connection, transaction);
                 insertSms.Parameters.Add("@TenantId", SqlDbType.BigInt).Value = tenantId;
                 insertSms.Parameters.Add("@Mobile", SqlDbType.NVarChar, 20).Value = mobile;
                 insertSms.Parameters.Add("@Message", SqlDbType.NVarChar, 2000).Value = text;
                 insertSms.Parameters.Add("@ProviderCode", SqlDbType.NVarChar, 50).Value =
                     (object?)providerCode ?? DBNull.Value;
+                insertSms.Parameters.Add("@IdempotencyKey", SqlDbType.NVarChar, 200).Value = idempotencyKey;
                 smsMessageId = Convert.ToInt64(await insertSms.ExecuteScalarAsync(ct));
                 jobPayload = JsonSerializer.Serialize(new { smsMessageId = smsMessageId.Value });
             }
