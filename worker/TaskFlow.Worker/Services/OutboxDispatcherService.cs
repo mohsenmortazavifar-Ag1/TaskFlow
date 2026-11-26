@@ -8,6 +8,7 @@ namespace TaskFlow.Worker.Services;
 public sealed class OutboxDispatcherService(
     TenantRegistryRepository registry,
     TenantSqlConnectionFactory tenantConnections,
+    TenantDatabaseLock tenantLock,
     TenantOutboxRepository outbox,
     CentralJobPublisher publisher,
     WorkerHeartbeatService heartbeat,
@@ -23,8 +24,7 @@ public sealed class OutboxDispatcherService(
             return;
         }
 
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(
-            Math.Clamp(config.PollingIntervalSeconds, 2, 300)));
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Clamp(config.PollingIntervalSeconds, 2, 300)));
         logger.LogInformation("Outbox Dispatcher started. Tenant concurrency: {Concurrency}.",
             Math.Clamp(config.MaxTenantConcurrency, 1, 16));
 
@@ -39,14 +39,8 @@ public sealed class OutboxDispatcherService(
                     CancellationToken = stoppingToken
                 }, async (tenant, ct) => await ProcessTenantAsync(tenant, config, ct));
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Outbox Dispatcher polling cycle failed.");
-            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception ex) { logger.LogError(ex, "Outbox Dispatcher polling cycle failed."); }
 
             try { await timer.WaitForNextTickAsync(stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
@@ -58,6 +52,11 @@ public sealed class OutboxDispatcherService(
         try
         {
             await using var connection = await tenantConnections.OpenAsync(tenant, ct);
+            // Session-owned exclusive lock: a second Worker (or another hosted service in
+            // this process) cannot process this tenant until this entire batch is finished.
+            await using var lease = await tenantLock.AcquireAsync(
+                connection, tenant.TenantDatabaseId, heartbeat.WorkerId, ct);
+
             var messages = await outbox.ClaimAsync(connection, heartbeat.WorkerId,
                 config.BatchSizePerTenant, config.LeaseSeconds, ct);
 
@@ -68,25 +67,17 @@ public sealed class OutboxDispatcherService(
                 {
                     await publisher.PublishAsync(tenant.TenantId, message, ct);
                     await outbox.MarkPublishedAsync(connection, message.OutboxId, heartbeat.WorkerId, ct);
-                    logger.LogDebug("Published outbox {OutboxId} for tenant {TenantId}.",
-                        message.OutboxId, tenant.TenantId);
+                    logger.LogDebug("Published outbox {OutboxId} for tenant {TenantId}.", message.OutboxId, tenant.TenantId);
                 }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Outbox {OutboxId} for tenant {TenantId} failed.",
-                        message.OutboxId, tenant.TenantId);
+                    logger.LogError(ex, "Outbox {OutboxId} for tenant {TenantId} failed.", message.OutboxId, tenant.TenantId);
                     await outbox.MarkFailedAsync(connection, message, heartbeat.WorkerId, ex, ct);
                 }
             }
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             logger.LogError(ex,
