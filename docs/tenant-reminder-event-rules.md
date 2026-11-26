@@ -1,6 +1,6 @@
 # Tenant reminder event rules
 
-Apply `database/tenant/005_move_reminder_tables_to_notification.sql` to every tenant database to migrate legacy `dbo` tables. The tenant outbox, reminder schedules, event rules and event inbox are stored in the `notification` schema. For a fresh tenant, run the tenant migrations in order; they create these tables directly in `notification`. Apply `database/007_reminder_schedule_occurrence_count.sql` to the central TaskFlow database before deploying the updated Worker.
+The tenant outbox, reminder schedules, occurrences, event rules and event inbox are stored in the `notification` schema of each operational Tenant database. For a fresh tenant, run the tenant migrations in order. Apply `database/tenant/005_move_reminder_tables_to_notification.sql` only when upgrading a tenant database that still has the legacy reminder/outbox tables in `dbo`. The central TaskFlow database does not need reminder tables or reminder-specific migrations.
 
 ## Event contracts
 
@@ -41,9 +41,9 @@ Replace the rule ID and message with the tenant's actual rule and approved text.
 
 ## Execution semantics
 
-- Event processing runs entirely inside `TaskFlow.Worker`. The tenant Outbox dispatcher publishes `ProcessReminderEvent` jobs to the central queue; the Worker resolves the active tenant database, applies cancellation and creation rules transactionally, records the event in `notification.ReminderEventInbox`, then refreshes the central reminder projection. The web application does not expose or participate in an event-processing endpoint.
+- Event processing runs entirely inside `TaskFlow.Worker`. The tenant Outbox dispatcher publishes `ProcessReminderEvent` jobs to the central queue; the Worker resolves the active tenant database, applies cancellation and creation rules transactionally, records the event in `notification.ReminderEventInbox`, and creates or updates reminder schedules directly in that Tenant database. The web application does not expose or participate in an event-processing endpoint.
 
-- `MaxOccurrences` counts occurrences materialized by the central Scheduler, including the first due occurrence. For example, 3 means at most three scheduled reminder jobs.
+- `MaxOccurrences` counts occurrences materialized by the tenant-owned Scheduler, including the first due occurrence. For example, 3 means at most three scheduled reminder jobs.
 - SMS provider retries happen in the SMS job pipeline; they do not create additional reminder occurrences.
 - `LocalTime` is applied to the first due date after the configured delay and to subsequent recurring dates using `TimeZoneId`.
 - `CancelEventType` accepts one event code or a comma-separated list. A matching cancellation event disables the schedule, clears its next run time and increments `ScheduleVersion`, invalidating queued-but-not-yet-executed occurrences.
@@ -55,6 +55,6 @@ For `RepairCompletedFollowUp`, migration `database/tenant/006_order_selected_ser
 
 The due date is calculated from the event's `occurredAtUtc` in the rule's `TimeZoneId`, clamping month-end dates (for example, November 30 plus three months becomes February 28/29). The schedule is one-shot: no recurrence interval is stored, so the scheduler clears `NextRunAtUtc` after materializing its single occurrence. The rule also uses `MaxOccurrences = 1`.
 
-Apply `004_seed_repair_completed_rule.sql` first, then `006_order_selected_service_reminder_delay.sql` to every Repair tenant database. The latter invalidates previously projected fixed-delay schedules for this rule; the tenant reminder sync must run so the central scheduler projection receives the disabled state.
+Apply `004_seed_repair_completed_rule.sql` first, then `006_order_selected_service_reminder_delay.sql` to every Repair tenant database. The latter invalidates any previous fixed-delay schedules for this rule directly in the Tenant database; no central projection or sync process is involved.
 
 Repair emits the selected interval only on the `RepairCompleted` event created by the transition to `Repaired`. If the order preference is disabled, the dynamic rule is skipped and no follow-up schedule is created. Moving the order back to repair, delivering it, or cancelling it disables any active schedule.

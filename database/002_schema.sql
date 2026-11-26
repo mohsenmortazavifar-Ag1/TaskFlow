@@ -35,16 +35,6 @@ END;
 GO
 IF OBJECT_ID('dbo.TenantSmsSettings','U') IS NULL CREATE TABLE dbo.TenantSmsSettings(TenantId bigint PRIMARY KEY,IsEnabled bit NOT NULL DEFAULT(1),ProviderCode nvarchar(50) NOT NULL,SenderNumber nvarchar(30) NULL,MaxPerMinute int NULL,DailyLimit int NULL,UpdatedAt datetime2(3) NOT NULL DEFAULT(SYSUTCDATETIME()));
 GO
-IF OBJECT_ID('dbo.ReminderSchedules','U') IS NULL BEGIN
- CREATE TABLE dbo.ReminderSchedules(ReminderScheduleId bigint IDENTITY PRIMARY KEY,TenantId bigint NOT NULL,ReminderType nvarchar(100) NOT NULL,SourceEntity nvarchar(100) NOT NULL,SourceEntityId bigint NOT NULL,RuleJson nvarchar(max) NOT NULL,TimeZoneId nvarchar(100) NOT NULL,ScheduleVersion int NOT NULL DEFAULT(1),OccurrenceCount int NOT NULL DEFAULT(0),IsEnabled bit NOT NULL DEFAULT(1),NextRunAtUtc datetime2(3) NULL,CreatedAt datetime2(3) NOT NULL DEFAULT(SYSUTCDATETIME()),UpdatedAt datetime2(3) NULL,CONSTRAINT CK_Reminder_RuleJson CHECK(ISJSON(RuleJson)=1));
- CREATE INDEX IX_ReminderSchedules_Due ON dbo.ReminderSchedules(IsEnabled,NextRunAtUtc) INCLUDE(TenantId,ScheduleVersion);
-END;
-GO
-IF OBJECT_ID('dbo.ReminderOccurrences','U') IS NULL BEGIN
- CREATE TABLE dbo.ReminderOccurrences(ReminderOccurrenceId bigint IDENTITY PRIMARY KEY,ReminderScheduleId bigint NOT NULL,ScheduleVersion int NOT NULL,DueAtUtc datetime2(3) NOT NULL,Status tinyint NOT NULL DEFAULT(0),JobId bigint NULL,CreatedAt datetime2(3) NOT NULL DEFAULT(SYSUTCDATETIME()),ExecutedAt datetime2(3) NULL,CONSTRAINT FK_ReminderOccurrences_Schedule FOREIGN KEY(ReminderScheduleId) REFERENCES dbo.ReminderSchedules(ReminderScheduleId),CONSTRAINT FK_ReminderOccurrences_Job FOREIGN KEY(JobId) REFERENCES dbo.Jobs(JobId),CONSTRAINT UQ_ReminderOccurrence_Due UNIQUE(ReminderScheduleId,ScheduleVersion,DueAtUtc));
- CREATE INDEX IX_ReminderOccurrences_Status_Due ON dbo.ReminderOccurrences(Status,DueAtUtc);
-END;
-GO
 IF SCHEMA_ID('ops') IS NULL EXEC('CREATE SCHEMA ops');
 GO
 IF OBJECT_ID('ops.WorkerEvents','U') IS NULL BEGIN

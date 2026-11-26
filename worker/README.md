@@ -82,14 +82,16 @@ Seed فعلی رویداد `RepairCompleted` را به یک یادآوری یک�
 
 ### Migrationهای دیتابیس مرکزی
 
-روی دیتابیس `TaskFlow` نیز این Migrationها لازم‌اند:
+روی دیتابیس `TaskFlow` این Migrationها برای مسیر فعلی SMS لازم‌اند:
 
 - `database/006_sms_delivery_tracking.sql`
 - `database/008_sms_idempotency_billing_foundation.sql`
 - `database/009_sms_tenant_database_reference.sql`
 - `database/010_sms_tenant_log_outbox.sql`
 
-Billing در این نسخه فعال نیست؛ فیلدهای قیمت و هزینه صرفاً برای ثبت Snapshot در نسخه آتی آماده شده‌اند. Migration مرکزی 010 ستون `TenantSyncedAt` را برای Outbox تاریخچه پیامک اضافه می‌کند.
+برای دیتابیس‌های قدیمی که Migrationهای تاریخی `005_tenant_reminder_sync.sql` یا `007_reminder_schedule_occurrence_count.sql` را اجرا کرده‌اند، پس از اطمینان از انتقال داده‌های موردنیاز به دیتابیس Tenant، `database/011_archive_legacy_central_reminders.sql` را اجرا کنید. این Migration جداول Projection مرکزی و وضعیت Sync قدیمی را با حفظ داده‌ها به نام‌های Archive تغییر می‌دهد. Migrationهای 005 و 007 تاریخی‌اند و نباید در نصب تازه اجرا شوند؛ Schema مرکزی جدید دیگر جدول Reminder نمی‌سازد.
+
+Billing در این نسخه فعال نیست؛ فیلدهای قیمت و هزینه صرفاً برای ثبت Snapshot در نسخه آتی آماده شده‌اند. Migration مرکزی 010 ستون‌های retry/sync تاریخچه پیامک را اضافه می‌کند.
 
 ## محدودیت‌ها و راه‌اندازی
 - Outbox انتقال at-least-once با ثبت مرکزی idempotent فراهم می‌کند؛ ارسال SMS به Provider دقیقاً یک‌بار تضمین نمی‌شود.

@@ -22,7 +22,8 @@
    - `database/009_sms_tenant_database_reference.sql`
    - `database/010_sms_tenant_log_outbox.sql`
 4. اسکریپت‌های `database/tenant` را به ترتیب روی هر دیتابیس عملیاتی Tenant اجرا کنید.
-5. سپس `npm install` و `npm run dev` را اجرا کنید.
+5. برای دیتابیس مرکزی قدیمی که Migrationهای 005 یا 007 یادآوری را قبلاً اجرا کرده است، Migration `database/011_archive_legacy_central_reminders.sql` را اجرا کنید تا جداول Projection قدیمی با حفظ داده‌ها آرشیو شوند. این Migration برای دیتابیس تازه‌ای که از Schema اصلاح‌شده ساخته شده لازم نیست.
+6. سپس `npm install` و `npm run dev` را اجرا کنید.
 
 ## Worker
 Worker یک Process مستقل از Next.js است. راهنمای اجرا، تنظیمات، نصب Windows Service/Linux systemd و اتصال به MasterRepair در [worker/README.md](worker/README.md) و [worker/deploy/README.md](worker/deploy/README.md) قرار دارد.
@@ -31,9 +32,8 @@ Worker یک Process مستقل از Next.js است. راهنمای اجرا، ت
 - `GET /api/health`: بررسی اتصال SQL Server
 - `GET /api/jobs` و `POST /api/jobs`: مدیریت داخلی Jobها با Header `x-taskflow-api-key`
 - `GET/POST /api/reminders`, `PATCH/DELETE /api/reminders/{id}`: مدیریت تعریف‌های Reminder
-- `POST /api/reminder-events`: دریافت رویدادهای تجاری و تبدیل Ruleهای Tenant به Reminder Schedule
 
-APIهای Reminder و رویداد فقط برای Backendهای مورد اعتماد هستند. کلید `TASKFLOW_API_KEY` را هرگز در Frontend یا متغیرهای `NEXT_PUBLIC_*` قرار ندهید. در API رویداد، `tenantDatabaseId` باید همراه `tenantId` ارسال شود تا دیتابیس عملیاتی دقیق از MasterRepair انتخاب شود.
+APIهای داخلی Job و Reminder فقط برای Backendهای مورد اعتماد هستند. کلید `TASKFLOW_API_KEY` را هرگز در Frontend یا متغیرهای `NEXT_PUBLIC_*` قرار ندهید. APIهای Reminder مستقیماً دیتابیس عملیاتی Tenant انتخاب‌شده را تغییر می‌دهند.
 
 ## معماری Tenant-owned Reminder
 
