@@ -52,6 +52,8 @@ builder.Services.AddSingleton<CentralJobPublisher>();
 builder.Services.AddHostedService<OutboxDispatcherService>();
 // Reminder definitions and execution cursors are tenant-owned; do not register central projection/scheduler.
 builder.Services.AddHostedService<TenantReminderSchedulerService>();
+// Central SMS delivery events are mirrored to the owning tenant DB with durable retries.
+builder.Services.AddHostedService<TenantSmsLogSyncService>();
 
 var host = builder.Build();
 await host.RunAsync();

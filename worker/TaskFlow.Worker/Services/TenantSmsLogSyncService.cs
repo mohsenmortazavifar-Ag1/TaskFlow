@@ -85,19 +85,20 @@ public sealed class TenantSmsLogSyncService(
                         IF NOT EXISTS
                         (
                             SELECT 1 FROM notification.SmsLogs
-                            WHERE TaskFlowSmsMessageId = @SmsMessageId AND EventType = @EventType
+                            WHERE TaskFlowSmsLogId = @SmsLogId
                         )
                         INSERT notification.SmsLogs
                             (Mobile, Message, Status, ProviderMessageId, ErrorMessage, SentAt,
-                             TaskFlowSmsMessageId, EventType, ProviderCode, ProviderStatus)
+                             TaskFlowSmsMessageId, TaskFlowSmsLogId, EventType, ProviderCode, ProviderStatus)
                         VALUES
                             (@Mobile, @Message, @EventType, @ProviderMessageId,
                              CASE WHEN @EventType IN (N'ProviderRejected', N'SubmissionUnknown',
                                  N'DeliveryUnknown', N'DeliveryUnconfirmed', N'Undelivered') THEN @Description ELSE NULL END,
-                             @SentAt, @SmsMessageId, @EventType, @ProviderCode, @ProviderStatus);
+                             @SentAt, @SmsMessageId, @SmsLogId, @EventType, @ProviderCode, @ProviderStatus);
                         """, tenantConnection))
                     {
                         insert.Parameters.Add("@SmsMessageId", SqlDbType.BigInt).Value = log.SmsMessageId;
+                        insert.Parameters.Add("@SmsLogId", SqlDbType.BigInt).Value = log.SmsLogId;
                         insert.Parameters.Add("@EventType", SqlDbType.NVarChar, 50).Value = log.EventType;
                         insert.Parameters.Add("@Mobile", SqlDbType.NVarChar, 20).Value = log.Mobile;
                         insert.Parameters.Add("@Message", SqlDbType.NVarChar, 2000).Value = log.Message;
@@ -109,10 +110,11 @@ public sealed class TenantSmsLogSyncService(
                         await insert.ExecuteNonQueryAsync(ct);
                     }
 
+                    await using var centralMarkConnection = await jobs.OpenConnectionAsync(ct);
                     await using var mark = new SqlCommand("""
                         UPDATE dbo.SmsLogs SET TenantSyncedAt = SYSUTCDATETIME()
                         WHERE SmsLogId = @SmsLogId AND TenantSyncedAt IS NULL;
-                        """, await jobs.OpenConnectionAsync(ct));
+                        """, centralMarkConnection);
                     mark.Parameters.Add("@SmsLogId", SqlDbType.BigInt).Value = log.SmsLogId;
                     await mark.ExecuteNonQueryAsync(ct);
                 }
