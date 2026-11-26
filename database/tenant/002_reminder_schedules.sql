@@ -1,5 +1,5 @@
 -- Apply to each tenant database.
--- Tenant-local definitions are the source of truth. Worker projects these rows into central TaskFlow.
+-- Tenant-local definitions are the source of truth; the Worker schedules them directly in this database.
 IF SCHEMA_ID(N'notification') IS NULL EXEC(N'CREATE SCHEMA notification');
 IF OBJECT_ID(N'dbo.ReminderSchedules', N'U') IS NOT NULL AND OBJECT_ID(N'notification.ReminderSchedules', N'U') IS NULL
     EXEC(N'ALTER SCHEMA notification TRANSFER dbo.ReminderSchedules');
@@ -31,5 +31,5 @@ GO
 
 -- The application must update UpdatedAt and increment ScheduleVersion whenever
 -- reminder content, recurrence, timezone, enabled state, or target entity changes.
--- Disable schedules instead of physically deleting them so the central projection
--- can invalidate pending occurrences safely.
+-- Disable schedules instead of physically deleting them so pending tenant occurrences
+-- can be invalidated safely.
