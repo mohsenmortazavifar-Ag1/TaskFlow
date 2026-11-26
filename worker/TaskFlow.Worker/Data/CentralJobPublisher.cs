@@ -8,7 +8,7 @@ namespace TaskFlow.Worker.Data;
 /// <summary>Transfers tenant outbox events into the central queue with an idempotent key.</summary>
 public sealed class CentralJobPublisher(SqlConnectionFactory centralConnections)
 {
-    public async Task PublishAsync(long tenantId, OutboxMessage message, CancellationToken ct)
+    public async Task PublishAsync(long tenantId, long tenantDatabaseId, OutboxMessage message, CancellationToken ct)
     {
         if (tenantId != message.TenantId)
             throw new InvalidOperationException("Outbox tenant ID does not match the tenant registry entry.");
@@ -53,18 +53,19 @@ public sealed class CentralJobPublisher(SqlConnectionFactory centralConnections)
                     ? providerNode.GetString() : null;
 
                 await using var insertSms = new SqlCommand("""
-                    INSERT INTO dbo.SmsMessages(TenantId, Mobile, Message, ProviderCode, Status, IdempotencyKey)
+                    INSERT INTO dbo.SmsMessages(TenantId, TenantDatabaseId, Mobile, Message, ProviderCode, Status, IdempotencyKey)
                     OUTPUT INSERTED.SmsMessageId
-                    VALUES(@TenantId, @Mobile, @Message, @ProviderCode, 0, @IdempotencyKey);
+                    VALUES(@TenantId, @TenantDatabaseId, @Mobile, @Message, @ProviderCode, 0, @IdempotencyKey);
                     """, connection, transaction);
                 insertSms.Parameters.Add("@TenantId", SqlDbType.BigInt).Value = tenantId;
+                insertSms.Parameters.Add("@TenantDatabaseId", SqlDbType.BigInt).Value = tenantDatabaseId;
                 insertSms.Parameters.Add("@Mobile", SqlDbType.NVarChar, 20).Value = mobile;
                 insertSms.Parameters.Add("@Message", SqlDbType.NVarChar, 2000).Value = text;
                 insertSms.Parameters.Add("@ProviderCode", SqlDbType.NVarChar, 50).Value =
                     (object?)providerCode ?? DBNull.Value;
                 insertSms.Parameters.Add("@IdempotencyKey", SqlDbType.NVarChar, 200).Value = idempotencyKey;
                 smsMessageId = Convert.ToInt64(await insertSms.ExecuteScalarAsync(ct));
-                jobPayload = JsonSerializer.Serialize(new { smsMessageId = smsMessageId.Value });
+                jobPayload = JsonSerializer.Serialize(new { smsMessageId = smsMessageId.Value, tenantDatabaseId });
             }
 
             await using var insertJob = new SqlCommand("""
