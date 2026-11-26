@@ -147,8 +147,7 @@ public sealed class SendSmsHandler(
                 LastError = NULL
             WHERE SmsMessageId = @SmsMessageId
               AND TenantId = @TenantId
-              AND SubmissionState = 0
-;
+              AND SubmissionState = 0;
             """, connection))
         {
             claim.Parameters.Add("@SmsMessageId", SqlDbType.BigInt).Value = sms.SmsMessageId;
