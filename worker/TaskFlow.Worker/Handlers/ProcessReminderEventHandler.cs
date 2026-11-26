@@ -36,7 +36,7 @@ public sealed class ProcessReminderEventHandler(
             string.IsNullOrWhiteSpace(payload.SourceEntity) || payload.SourceEntity.Length > 100 ||
             !long.TryParse(payload.SourceEntityId, NumberStyles.None, CultureInfo.InvariantCulture, out var sourceEntityId) ||
             sourceEntityId <= 0 || !DateTimeOffset.TryParse(payload.OccurredAtUtc, CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind, out var occurredAt))
+                DateTimeStyles.None, out var occurredAt))
             throw new InvalidOperationException("Reminder event payload failed validation.");
 
         payload.Data ??= new Dictionary<string, string>();
