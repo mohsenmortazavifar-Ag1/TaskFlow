@@ -20,8 +20,7 @@
    - `database/008_sms_idempotency_billing_foundation.sql`
    - `database/009_sms_tenant_database_reference.sql`
    - `database/010_sms_tenant_log_outbox.sql`
-   - Migrationهای `database/tenant` طبق ترتیب درج‌شده در `worker/README.md` (از جمله `008_sms_delivery_logs.sql`)
-4. اسکریپت‌های `database/tenant` را به ترتیب روی هر دیتابیس عملیاتی Tenant اجرا کنید.
+4. اسکریپت‌های `database/tenant` را به ترتیب درج‌شده در `worker/README.md` روی هر دیتابیس عملیاتی Tenant اجرا کنید؛ این فهرست شامل `008_sms_delivery_logs.sql` نیز هست.
 5. برای دیتابیس مرکزی قدیمی که Migrationهای تاریخی `005_tenant_reminder_sync.sql` یا `007_reminder_schedule_occurrence_count.sql` را قبلاً اجرا کرده است، پس از اطمینان از انتقال داده‌های موردنیاز به دیتابیس Tenant، Migration `database/011_archive_legacy_central_reminders.sql` را اجرا کنید. این Migration جداول قدیمی را با حفظ داده‌ها آرشیو می‌کند؛ در نصب تازه Migrationهای 005 و 007 را اجرا نکنید.
 6. سپس `npm install` و `npm run dev` را اجرا کنید.
 
