@@ -53,11 +53,11 @@ Outbox Dispatcher در همان Worker Process اجرا می‌شود. از Mast
 4. `OutboxDispatcherService` رویداد را با کلید یکتا به Job مرکزی `ExecuteReminder` تبدیل می‌کند.
 5. `ExecuteReminderHandler` وضعیت Schedule و Occurrence را از Tenant می‌خواند و با کلید idempotency یکتا، `SmsMessages` و Job نوع `SendSms` را در دیتابیس مرکزی ایجاد می‌کند.
 6. `SendSmsHandler` قبل از ارسال، وضعیت یادآوری را دوباره در Tenant بررسی می‌کند و سپس پیام را برای ParsGreen ارسال می‌کند.
-7. رویدادهای ثبت‌شده در central `dbo.SmsLogs` توسط `TenantSmsLogSyncService` به `notification.SmsLogs` همان Tenant منتقل می‌شوند. انتقال بعد از ثبت موفق در Tenant علامت‌گذاری می‌شود و در صورت توقف Worker قابل تکرار است.
+7. رویدادهای ثبت‌شده در central `dbo.SmsLogs` توسط `TenantSmsLogSyncService` به `notification.SmsLogs` همان Tenant منتقل می‌شوند. انتقال بعد از ثبت موفق در Tenant علامت‌گذاری می‌شود و در صورت توقف Worker قابل تکرار است. دیتابیس غیرفعال یا خطای موقت با زمان تلاش بعدی و Backoff ثبت می‌شود تا صف Tenantهای دیگر متوقف نشود.
 
 ### انحصار پردازش Tenant
 
-تمام Worker pathهایی که به دیتابیس Tenant دسترسی عملیاتی دارند از `TenantDatabaseLock` و `sp_getapplock` با قفل Exclusive و Session ownership استفاده می‌کنند. در نتیجه دو Worker نمی‌توانند هم‌زمان یک Tenant را پردازش کنند؛ پردازش Tenantهای متفاوت همچنان موازی است. اتصال SQL تا پایان عملیات باز می‌ماند تا قفل آزاد نشود.
+تمام Worker pathهایی که به دیتابیس Tenant دسترسی عملیاتی دارند از `TenantDatabaseLock` و `sp_getapplock` با قفل Exclusive و Session ownership استفاده می‌کنند. APIهای ایجاد، ویرایش و لغو Reminder نیز همان Resource را با LockOwner=Transaction می‌گیرند؛ بنابراین تغییر Schedule نمی‌تواند هم‌زمان با اعتبارسنجی یا ارسال Worker جلو برود. اگر Worker در حال پردازش Tenant باشد، درخواست تغییر Reminder پس از 10 ثانیه انتظار با HTTP 409 برمی‌گردد. دو Worker نمی‌توانند هم‌زمان یک Tenant را پردازش کنند؛ پردازش Tenantهای متفاوت همچنان موازی است. اتصال SQL Worker تا پایان عملیات باز می‌ماند تا قفل آزاد نشود.
 
 ### محدودیت تکرار یادآوری
 

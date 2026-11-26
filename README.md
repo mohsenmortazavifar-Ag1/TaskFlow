@@ -49,7 +49,7 @@ APIهای Reminder و رویداد فقط برای Backendهای مورد اعت
 6. `SendSmsHandler` وضعیت یادآوری را در Tenant دوباره بررسی می‌کند و پیام را به ParsGreen می‌فرستد.
 7. رویدادهای مرکزی `dbo.SmsLogs` توسط `TenantSmsLogSyncService` با شناسه یکتای رویداد به `notification.SmsLogs` همان Tenant منتقل می‌شوند.
 
-همه مسیرهای Worker که به یک Tenant دسترسی عملیاتی دارند از قفل Exclusive مبتنی بر `sp_getapplock` استفاده می‌کنند؛ دو Worker نمی‌توانند یک Tenant را هم‌زمان پردازش کنند، اما Tenantهای مختلف موازی پردازش می‌شوند.
+همه مسیرهای Worker که به یک Tenant دسترسی عملیاتی دارند از قفل Exclusive مبتنی بر `sp_getapplock` استفاده می‌کنند. APIهای ایجاد، ویرایش و لغو Reminder نیز همان قفل را در سطح Transaction می‌گیرند تا تغییر Schedule با اعتبارسنجی یا ارسال Worker تداخل نداشته باشد. دو Worker نمی‌توانند یک Tenant را هم‌زمان پردازش کنند، اما Tenantهای مختلف موازی پردازش می‌شوند.
 
 برای جزئیات تنظیمات و ترتیب کامل Migrationهای مرکزی و Tenant، به [راهنمای Worker](worker/README.md) مراجعه کنید. در این نسخه Worker برای پردازش Reminder مستقیماً به دیتابیس Tenant متصل می‌شود و به `TaskFlowApi__BaseUrl` یا `TaskFlowApi__ApiKey` وابسته نیست.
 
