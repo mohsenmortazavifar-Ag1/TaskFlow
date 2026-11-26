@@ -168,6 +168,8 @@ public sealed class TenantReminderSchedulerService(
         var localTime = root.TryGetProperty("localTime", out var lt) ? lt.GetString() : null;
         if (interval.HasValue && (interval.Value < 1 || interval.Value > 3650 || unit is not ("day" or "month" or "year")))
             throw new InvalidOperationException("Reminder recurrence interval is invalid.");
+        if (interval.HasValue && !max.HasValue)
+            throw new InvalidOperationException("Recurring reminders must have a finite MaxOccurrences value.");
         if (!interval.HasValue && unit is not null)
             throw new InvalidOperationException("Reminder recurrence unit cannot exist without an interval.");
         if (max.HasValue && max.Value is < 1 or > 1000)

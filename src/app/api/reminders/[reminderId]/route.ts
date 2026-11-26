@@ -17,6 +17,10 @@ const ruleSchema = z.object({
   maxOccurrences: z.number().int().min(1).max(1000).optional()
 }).strict().refine(v => (v.intervalValue === undefined) === (v.intervalUnit === undefined), {
   message: "intervalValue and intervalUnit must be supplied together."
+}).refine(v => v.intervalValue === undefined || v.maxOccurrences !== undefined, {
+  message: "maxOccurrences is required when recurrence is enabled."
+}).refine(v => v.intervalValue !== undefined || v.maxOccurrences === undefined, {
+  message: "maxOccurrences can only be supplied with a recurrence interval."
 });
 
 const patchSchema = z.object({

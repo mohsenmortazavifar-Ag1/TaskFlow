@@ -123,6 +123,9 @@ public sealed class ProcessReminderEventHandler(
             var rules = await ReadRulesAsync(connection, transaction, e.EventType, e.SourceEntity, false, ct);
             foreach (var rule in rules)
             {
+                if (rule.RecurrenceIntervalValue.HasValue && !rule.MaxOccurrences.HasValue)
+                    throw new InvalidOperationException($"Recurring reminder rule {rule.Id} must define MaxOccurrences (1-1000).");
+
                 if (!string.IsNullOrWhiteSpace(rule.DelayDataKey))
                 {
                     if (!values.TryGetValue(rule.DelayDataKey, out var dynamicDelay) || string.IsNullOrWhiteSpace(dynamicDelay))

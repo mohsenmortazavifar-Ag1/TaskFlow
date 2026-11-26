@@ -13,9 +13,14 @@ const ruleSchema = z.object({
   providerCode: z.string().trim().max(50).optional(),
   intervalValue: z.number().int().min(1).max(3650).optional(),
   intervalUnit: z.enum(["day", "month", "year"]).optional(),
+  maxOccurrences: z.number().int().min(1).max(1000).optional(),
   localTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional()
 }).strict().refine(v => (v.intervalValue === undefined) === (v.intervalUnit === undefined), {
   message: "intervalValue and intervalUnit must be supplied together."
+}).refine(v => v.intervalValue === undefined || v.maxOccurrences !== undefined, {
+  message: "maxOccurrences is required when recurrence is enabled."
+}).refine(v => v.intervalValue !== undefined || v.maxOccurrences === undefined, {
+  message: "maxOccurrences can only be supplied with a recurrence interval."
 });
 
 const createSchema = z.object({
