@@ -3,6 +3,7 @@ import {z} from "zod";
 import {hasValidApiKey} from "@/lib/auth";
 import {sql} from "@/lib/db";
 import {TenantDatabaseError, withTenantDatabase} from "@/lib/tenant-db";
+import {acquireTenantWorkerLock} from "@/lib/tenant-worker-lock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +39,8 @@ const patchSchema = z.object({
 function errorResponse(error: unknown) {
   if (error instanceof TenantDatabaseError)
     return NextResponse.json({error: error.message}, {status: error.status});
+  if (error instanceof Error && error.message.includes("TENANT_WORKER_LOCK_TIMEOUT"))
+    return NextResponse.json({error: "این Tenant در حال پردازش است؛ چند لحظه دیگر دوباره تلاش کنید."}, {status: 409});
   if (error instanceof Error && error.message === "REMINDER_NOT_FOUND")
     return NextResponse.json({error: "Reminder پیدا نشد."}, {status: 404});
   if (error instanceof Error && error.message === "REMINDER_VERSION_CONFLICT")
@@ -65,6 +68,7 @@ export async function PATCH(req: Request, context: {params: Promise<{reminderId:
       const transaction = new sql.Transaction(pool);
       await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
       try {
+        await acquireTenantWorkerLock(transaction, tenant.tenantDatabaseId);
         const currentResult = await new sql.Request(transaction)
           .input("ReminderScheduleId", sql.BigInt, reminderId)
           .query(`
@@ -161,6 +165,7 @@ export async function DELETE(req: Request, context: {params: Promise<{reminderId
       const transaction = new sql.Transaction(pool);
       await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
       try {
+        await acquireTenantWorkerLock(transaction, tenant.tenantDatabaseId);
         const result = await new sql.Request(transaction)
           .input("ReminderScheduleId", sql.BigInt, reminderId)
           .query(`

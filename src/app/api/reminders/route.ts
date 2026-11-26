@@ -3,6 +3,7 @@ import {z} from "zod";
 import {hasValidApiKey} from "@/lib/auth";
 import {sql} from "@/lib/db";
 import {TenantDatabaseError, withTenantDatabase} from "@/lib/tenant-db";
+import {acquireTenantWorkerLock} from "@/lib/tenant-worker-lock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +38,8 @@ const createSchema = z.object({
 function errorResponse(error: unknown) {
   if (error instanceof TenantDatabaseError)
     return NextResponse.json({error: error.message}, {status: error.status});
+  if (error instanceof Error && error.message.includes("TENANT_WORKER_LOCK_TIMEOUT"))
+    return NextResponse.json({error: "این Tenant در حال پردازش است؛ چند لحظه دیگر دوباره تلاش کنید."}, {status: 409});
   return NextResponse.json({error: "عملیات Reminder با خطا مواجه شد."}, {status: 500});
 }
 
@@ -80,41 +83,50 @@ export async function POST(req: Request) {
   const b = parsed.data;
   try {
     const created = await withTenantDatabase(b.tenantId, b.tenantDatabaseId, async (pool, tenant) => {
-      const result = await pool.request()
-        .input("ReminderType", sql.NVarChar(100), b.reminderType)
-        .input("SourceEntity", sql.NVarChar(100), b.sourceEntity)
-        .input("SourceEntityId", sql.BigInt, b.sourceEntityId)
-        .input("RuleJson", sql.NVarChar(sql.MAX), JSON.stringify(b.rule))
-        .input("TimeZoneId", sql.NVarChar(100), b.timeZoneId)
-        .input("NextRunAtUtc", sql.DateTime2, new Date(b.nextRunAtUtc))
-        .query(`
-          INSERT INTO notification.ReminderSchedules
-            (ReminderType, SourceEntity, SourceEntityId, RuleJson, TimeZoneId,
-             ScheduleVersion, IsEnabled, NextRunAtUtc, CreatedAt, UpdatedAt)
-          OUTPUT INSERTED.ReminderScheduleId, INSERTED.ReminderType, INSERTED.SourceEntity,
-                 INSERTED.SourceEntityId, INSERTED.RuleJson, INSERTED.TimeZoneId,
-                 INSERTED.ScheduleVersion, INSERTED.IsEnabled, INSERTED.NextRunAtUtc,
-                 INSERTED.UpdatedAt
-          VALUES
-            (@ReminderType, @SourceEntity, @SourceEntityId, @RuleJson, @TimeZoneId,
-             1, 1, @NextRunAtUtc, SYSUTCDATETIME(), SYSUTCDATETIME());
-        `);
-      const row = result.recordset[0];
-      return {
-        tenant,
-        reminder: {
-          reminderScheduleId: row.ReminderScheduleId,
-          reminderType: row.ReminderType,
-          sourceEntity: row.SourceEntity,
-          sourceEntityId: row.SourceEntityId,
-          ruleJson: row.RuleJson,
-          timeZoneId: row.TimeZoneId,
-          scheduleVersion: row.ScheduleVersion,
-          isEnabled: row.IsEnabled,
-          nextRunAtUtc: row.NextRunAtUtc,
-          updatedAt: row.UpdatedAt
-        }
-      };
+      const transaction = new sql.Transaction(pool);
+      await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+      try {
+        await acquireTenantWorkerLock(transaction, tenant.tenantDatabaseId);
+        const result = await new sql.Request(transaction)
+          .input("ReminderType", sql.NVarChar(100), b.reminderType)
+          .input("SourceEntity", sql.NVarChar(100), b.sourceEntity)
+          .input("SourceEntityId", sql.BigInt, b.sourceEntityId)
+          .input("RuleJson", sql.NVarChar(sql.MAX), JSON.stringify(b.rule))
+          .input("TimeZoneId", sql.NVarChar(100), b.timeZoneId)
+          .input("NextRunAtUtc", sql.DateTime2, new Date(b.nextRunAtUtc))
+          .query(`
+            INSERT INTO notification.ReminderSchedules
+              (ReminderType, SourceEntity, SourceEntityId, RuleJson, TimeZoneId,
+               ScheduleVersion, IsEnabled, NextRunAtUtc, CreatedAt, UpdatedAt)
+            OUTPUT INSERTED.ReminderScheduleId, INSERTED.ReminderType, INSERTED.SourceEntity,
+                   INSERTED.SourceEntityId, INSERTED.RuleJson, INSERTED.TimeZoneId,
+                   INSERTED.ScheduleVersion, INSERTED.IsEnabled, INSERTED.NextRunAtUtc,
+                   INSERTED.UpdatedAt
+            VALUES
+              (@ReminderType, @SourceEntity, @SourceEntityId, @RuleJson, @TimeZoneId,
+               1, 1, @NextRunAtUtc, SYSUTCDATETIME(), SYSUTCDATETIME());
+          `);
+        await transaction.commit();
+        const row = result.recordset[0];
+        return {
+          tenant,
+          reminder: {
+            reminderScheduleId: row.ReminderScheduleId,
+            reminderType: row.ReminderType,
+            sourceEntity: row.SourceEntity,
+            sourceEntityId: row.SourceEntityId,
+            ruleJson: row.RuleJson,
+            timeZoneId: row.TimeZoneId,
+            scheduleVersion: row.ScheduleVersion,
+            isEnabled: row.IsEnabled,
+            nextRunAtUtc: row.NextRunAtUtc,
+            updatedAt: row.UpdatedAt
+          }
+        };
+      } catch (error) {
+        await transaction.rollback().catch(() => undefined);
+        throw error;
+      }
     });
 
     return NextResponse.json({data: created.reminder}, {status: 201});
