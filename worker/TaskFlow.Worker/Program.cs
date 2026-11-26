@@ -46,12 +46,12 @@ builder.Services.AddHostedService<SmsDeliveryPollingService>();
 builder.Services.AddSingleton<ITenantSecretDecryptor, TenantSecretDecryptor>();
 builder.Services.AddSingleton<TenantRegistryRepository>();
 builder.Services.AddSingleton<TenantSqlConnectionFactory>();
+builder.Services.AddSingleton<TenantDatabaseLock>();
 builder.Services.AddSingleton<TenantOutboxRepository>();
 builder.Services.AddSingleton<CentralJobPublisher>();
 builder.Services.AddHostedService<OutboxDispatcherService>();
-builder.Services.AddSingleton<TenantReminderSyncService>();
-builder.Services.AddHostedService<TenantReminderSyncService>(sp => sp.GetRequiredService<TenantReminderSyncService>());
-builder.Services.AddHostedService<ReminderSchedulerService>();
+// Reminder definitions and execution cursors are tenant-owned; do not register central projection/scheduler.
+builder.Services.AddHostedService<TenantReminderSchedulerService>();
 
 var host = builder.Build();
 await host.RunAsync();
