@@ -49,7 +49,8 @@ builder.Services.AddSingleton<TenantSqlConnectionFactory>();
 builder.Services.AddSingleton<TenantOutboxRepository>();
 builder.Services.AddSingleton<CentralJobPublisher>();
 builder.Services.AddHostedService<OutboxDispatcherService>();
-builder.Services.AddHostedService<TenantReminderSyncService>();
+builder.Services.AddSingleton<TenantReminderSyncService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TenantReminderSyncService>());
 builder.Services.AddHostedService<ReminderSchedulerService>();
 
 var host = builder.Build();
