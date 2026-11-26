@@ -50,7 +50,7 @@ builder.Services.AddSingleton<TenantOutboxRepository>();
 builder.Services.AddSingleton<CentralJobPublisher>();
 builder.Services.AddHostedService<OutboxDispatcherService>();
 builder.Services.AddSingleton<TenantReminderSyncService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<TenantReminderSyncService>());
+builder.Services.AddHostedService<TenantReminderSyncService>(sp => sp.GetRequiredService<TenantReminderSyncService>());
 builder.Services.AddHostedService<ReminderSchedulerService>();
 
 var host = builder.Build();
