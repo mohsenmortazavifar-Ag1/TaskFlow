@@ -41,6 +41,8 @@ Replace the rule ID and message with the tenant's actual rule and approved text.
 
 ## Execution semantics
 
+- Event processing runs entirely inside `TaskFlow.Worker`. The tenant Outbox dispatcher publishes `ProcessReminderEvent` jobs to the central queue; the Worker resolves the active tenant database, applies cancellation and creation rules transactionally, records the event in `notification.ReminderEventInbox`, then refreshes the central reminder projection. The web application does not expose or participate in an event-processing endpoint.
+
 - `MaxOccurrences` counts occurrences materialized by the central Scheduler, including the first due occurrence. For example, 3 means at most three scheduled reminder jobs.
 - SMS provider retries happen in the SMS job pipeline; they do not create additional reminder occurrences.
 - `LocalTime` is applied to the first due date after the configured delay and to subsequent recurring dates using `TimeZoneId`.
