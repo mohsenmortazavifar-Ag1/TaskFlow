@@ -2,7 +2,7 @@ name: Web Build
 
 on:
   push:
-    branches: [main, feature/outbox-dispatcher]
+    branches: [main, feature/outbox-dispatcher, feature/order-specific-one-time-service-reminders]
     paths: ["src/**", "package.json", "package-lock.json", "tsconfig.json", "next.config.ts", ".github/workflows/web-build.yml"]
   pull_request:
     paths: ["src/**", "package.json", "package-lock.json", "tsconfig.json", "next.config.ts", ".github/workflows/web-build.yml"]
