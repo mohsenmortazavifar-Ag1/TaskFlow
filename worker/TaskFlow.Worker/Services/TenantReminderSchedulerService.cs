@@ -95,7 +95,7 @@ public sealed class TenantReminderSchedulerService(
                         INSERT notification.ReminderOccurrences
                             (ReminderScheduleId, ScheduleVersion, DueAtUtc, Status, ExecutionEventId)
                         OUTPUT INSERTED.ReminderOccurrenceId
-                        VALUES (@ScheduleId, @Version, @DueAtUtc, 0, @EventId);
+                        VALUES (@ScheduleId, @Version, @DueAtUtc, 1, @EventId);
                         """, connection, transaction))
                     {
                         occurrence.Parameters.Add("@ScheduleId", SqlDbType.BigInt).Value = schedule.Id;
