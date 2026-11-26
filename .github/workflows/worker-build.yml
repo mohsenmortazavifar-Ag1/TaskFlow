@@ -2,7 +2,7 @@ name: Worker Build
 
 on:
   push:
-    branches: [main, feature/dotnet-worker-host, feature/outbox-dispatcher, feature/order-specific-one-time-service-reminders]
+    branches: [main, feature/dotnet-worker-host, feature/outbox-dispatcher, feature/order-specific-one-time-service-reminders, feature/tenant-owned-reminders]
     paths: ["worker/**", "database/tenant/**", ".github/workflows/worker-build.yml"]
   pull_request:
     paths: ["worker/**", ".github/workflows/worker-build.yml"]
