@@ -15,7 +15,7 @@ namespace TaskFlow.Worker.Handlers;
 public sealed class ProcessReminderEventHandler(
     TenantRegistryRepository registry,
     TenantSqlConnectionFactory tenantConnections,
-    Services.TenantReminderSyncService projection,
+    TaskFlow.Worker.Services.TenantReminderSyncService projection,
     ILogger<ProcessReminderEventHandler> logger) : IJobHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
