@@ -7,6 +7,11 @@
 IF SCHEMA_ID(N'notification') IS NULL EXEC(N'CREATE SCHEMA notification');
 GO
 
+IF COL_LENGTH(N'notification.ReminderSchedules', N'OccurrenceCount') IS NULL
+    ALTER TABLE notification.ReminderSchedules ADD OccurrenceCount INT NOT NULL
+        CONSTRAINT DF_TenantReminderSchedules_OccurrenceCount DEFAULT(0) WITH VALUES;
+GO
+
 IF OBJECT_ID(N'notification.ReminderOccurrences', N'U') IS NULL
 BEGIN
     CREATE TABLE notification.ReminderOccurrences
