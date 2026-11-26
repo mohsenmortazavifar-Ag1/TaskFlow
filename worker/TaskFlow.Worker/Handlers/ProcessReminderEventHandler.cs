@@ -10,12 +10,12 @@ namespace TaskFlow.Worker.Handlers;
 
 /// <summary>
 /// Processes reminder domain events directly against the tenant database.
-/// The central reminder projection is refreshed only after the tenant transaction commits.
+/// Inbox and schedule changes are committed atomically in the tenant database.
 /// </summary>
 public sealed class ProcessReminderEventHandler(
     TenantRegistryRepository registry,
     TenantSqlConnectionFactory tenantConnections,
-    TaskFlow.Worker.Services.TenantReminderSyncService projection,
+    TenantDatabaseLock tenantLock,
     ILogger<ProcessReminderEventHandler> logger) : IJobHandler
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
@@ -47,10 +47,9 @@ public sealed class ProcessReminderEventHandler(
             ?? throw new InvalidOperationException($"Active tenant database was not found. TenantId={payload.TenantId}, TenantDatabaseId={payload.TenantDatabaseId}.");
 
         await using var connection = await tenantConnections.OpenAsync(tenant, cancellationToken);
+        await using var lease = await tenantLock.AcquireAsync(
+            connection, tenant.TenantDatabaseId, $"job:{job.JobId}", cancellationToken);
         var schedules = await ProcessTenantEventAsync(connection, payload, sourceEntityId, occurredAt.UtcDateTime, cancellationToken);
-
-        // Keep the central scheduler projection consistent with the tenant-owned source of truth.
-        await projection.SyncTenantAsync(tenant, cancellationToken);
         logger.LogInformation(
             "Processed reminder event {EventId} ({EventType}) for tenant {TenantId}. Created={Created}, affected schedules={Affected}.",
             payload.EventId, payload.EventType, payload.TenantId, schedules.Created, schedules.Affected);
