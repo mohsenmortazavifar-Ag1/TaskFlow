@@ -249,9 +249,11 @@ public sealed class ProcessReminderEventHandler(
         var localDate = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(delayed, DateTimeKind.Utc), zone).Date;
         var time = ParseLocalTime(localTime);
         var target = DateTime.SpecifyKind(localDate.Add(time), DateTimeKind.Unspecified);
-        if (TimeZoneInfo.ConvertTimeToUtc(target, zone) < delayed)
-            target = target.AddDays(1);
-        return ResolveLocalTime(target, zone);
+        var resolved = ResolveLocalTime(target, zone);
+        // The requested wall-clock time must never move the reminder before its delay.
+        if (resolved < delayed)
+            resolved = ResolveLocalTime(target.AddDays(1), zone);
+        return resolved;
     }
 
     private static DateTime CalculateCalendarMonthDueAt(DateTime occurredAtUtc, int months, string timeZoneId, string? localTime)
