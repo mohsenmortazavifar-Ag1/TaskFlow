@@ -48,6 +48,7 @@ public sealed class TenantSmsLogSyncService(
             FROM dbo.SmsLogs l
             INNER JOIN dbo.SmsMessages m ON m.SmsMessageId = l.SmsMessageId
             WHERE l.TenantSyncedAt IS NULL
+              AND (l.TenantSyncNextAttemptAt IS NULL OR l.TenantSyncNextAttemptAt <= SYSUTCDATETIME())
               AND m.TenantDatabaseId IS NOT NULL
             ORDER BY l.SmsLogId;
             """, central))
@@ -71,7 +72,9 @@ public sealed class TenantSmsLogSyncService(
                 var tenant = await registry.GetActiveDatabaseAsync(group.Key.TenantId, group.Key.TenantDatabaseId, ct);
                 if (tenant is null)
                 {
-                    logger.LogWarning("Skipping SMS log sync: tenant database {TenantDatabaseId} is not active.", group.Key.TenantDatabaseId);
+                    await DeferTenantLogsAsync(group.Key.TenantDatabaseId, 5,
+                        "Tenant database is not active in MasterRepair.", ct);
+                    logger.LogWarning("Deferred SMS log sync: tenant database {TenantDatabaseId} is not active.", group.Key.TenantDatabaseId);
                     continue;
                 }
 
@@ -112,7 +115,10 @@ public sealed class TenantSmsLogSyncService(
 
                     await using var centralMarkConnection = await jobs.OpenConnectionAsync(ct);
                     await using var mark = new SqlCommand("""
-                        UPDATE dbo.SmsLogs SET TenantSyncedAt = SYSUTCDATETIME()
+                        UPDATE dbo.SmsLogs
+                        SET TenantSyncedAt = SYSUTCDATETIME(),
+                            TenantSyncNextAttemptAt = NULL,
+                            TenantSyncLastError = NULL
                         WHERE SmsLogId = @SmsLogId AND TenantSyncedAt IS NULL;
                         """, centralMarkConnection);
                     mark.Parameters.Add("@SmsLogId", SqlDbType.BigInt).Value = log.SmsLogId;
@@ -124,9 +130,38 @@ public sealed class TenantSmsLogSyncService(
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
-                logger.LogError(ex, "SMS log synchronization failed for TenantDatabaseId {TenantDatabaseId}; rows remain retryable.",
+                try
+                {
+                    await DeferTenantLogsAsync(group.Key.TenantDatabaseId, 1, ex.Message, ct);
+                }
+                catch (Exception deferError)
+                {
+                    logger.LogError(deferError,
+                        "Could not defer failed SMS log sync rows for TenantDatabaseId {TenantDatabaseId}.",
+                        group.Key.TenantDatabaseId);
+                }
+                logger.LogError(ex, "SMS log synchronization failed for TenantDatabaseId {TenantDatabaseId}; rows were deferred for retry.",
                     group.Key.TenantDatabaseId);
             }
         }
+    }
+
+    private async Task DeferTenantLogsAsync(long tenantDatabaseId, int delayMinutes, string error, CancellationToken ct)
+    {
+        await using var connection = await jobs.OpenConnectionAsync(ct);
+        await using var command = new SqlCommand("""
+            UPDATE l
+            SET TenantSyncNextAttemptAt = DATEADD(MINUTE, @DelayMinutes, SYSUTCDATETIME()),
+                TenantSyncLastError = @Error
+            FROM dbo.SmsLogs l
+            INNER JOIN dbo.SmsMessages m ON m.SmsMessageId = l.SmsMessageId
+            WHERE m.TenantDatabaseId = @TenantDatabaseId
+              AND l.TenantSyncedAt IS NULL;
+            """, connection);
+        command.Parameters.Add("@TenantDatabaseId", SqlDbType.BigInt).Value = tenantDatabaseId;
+        command.Parameters.Add("@DelayMinutes", SqlDbType.Int).Value = Math.Clamp(delayMinutes, 1, 60);
+        command.Parameters.Add("@Error", SqlDbType.NVarChar, 1000).Value =
+            error.Length > 1000 ? error[..1000] : error;
+        await command.ExecuteNonQueryAsync(ct);
     }
 }
