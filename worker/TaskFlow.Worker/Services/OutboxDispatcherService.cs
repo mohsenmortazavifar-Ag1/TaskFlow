@@ -65,7 +65,7 @@ public sealed class OutboxDispatcherService(
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    await publisher.PublishAsync(tenant.TenantId, message, ct);
+                    await publisher.PublishAsync(tenant.TenantId, tenant.TenantDatabaseId, message, ct);
                     await outbox.MarkPublishedAsync(connection, message.OutboxId, heartbeat.WorkerId, ct);
                     logger.LogDebug("Published outbox {OutboxId} for tenant {TenantId}.", message.OutboxId, tenant.TenantId);
                 }
