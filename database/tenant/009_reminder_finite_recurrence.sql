@@ -15,6 +15,14 @@ WHERE RecurrenceIntervalValue IS NOT NULL
   AND MaxOccurrences IS NULL;
 GO
 
+-- Bound existing manually-created schedules as well; they may predate the API validation.
+UPDATE notification.ReminderSchedules
+SET RuleJson = JSON_MODIFY(RuleJson, '$.maxOccurrences', 12),
+    UpdatedAt = SYSUTCDATETIME()
+WHERE TRY_CONVERT(INT, JSON_VALUE(RuleJson, '$.intervalValue')) IS NOT NULL
+  AND JSON_VALUE(RuleJson, '$.maxOccurrences') IS NULL;
+GO
+
 IF NOT EXISTS
 (
     SELECT 1 FROM sys.check_constraints
@@ -28,6 +36,6 @@ IF NOT EXISTS
         (RecurrenceIntervalValue IS NULL AND RecurrenceIntervalUnit IS NULL)
         OR
         (RecurrenceIntervalValue IS NOT NULL AND RecurrenceIntervalUnit IS NOT NULL
-         AND MaxOccurrences BETWEEN 1 AND 1000)
+         AND MaxOccurrences IS NOT NULL AND MaxOccurrences BETWEEN 1 AND 1000)
     );
 GO
