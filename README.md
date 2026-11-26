@@ -18,6 +18,9 @@
    - `database/004_procedures.sql`
    - `database/005_tenant_reminder_sync.sql`
    - `database/006_sms_delivery_tracking.sql` (SMS submission and ParsGreen delivery tracking)
+   - `database/008_sms_idempotency_billing_foundation.sql`
+   - `database/009_sms_tenant_database_reference.sql`
+   - `database/010_sms_tenant_log_outbox.sql`
 4. اسکریپت‌های `database/tenant` را به ترتیب روی هر دیتابیس عملیاتی Tenant اجرا کنید.
 5. سپس `npm install` و `npm run dev` را اجرا کنید.
 
@@ -32,19 +35,27 @@ Worker یک Process مستقل از Next.js است. راهنمای اجرا، ت
 
 APIهای Reminder و رویداد فقط برای Backendهای مورد اعتماد هستند. کلید `TASKFLOW_API_KEY` را هرگز در Frontend یا متغیرهای `NEXT_PUBLIC_*` قرار ندهید. در API رویداد، `tenantDatabaseId` باید همراه `tenantId` ارسال شود تا دیتابیس عملیاتی دقیق از MasterRepair انتخاب شود.
 
-## اتصال رویداد تکمیل تعمیر
+## معماری Tenant-owned Reminder
 
-Repair هنگام تغییر وضعیت سفارش به `Repaired`، رویداد `RepairCompleted` را در جدول `dbo.OutboxMessages` دیتابیس Tenant و در همان تراکنش SQL ثبت می‌کند. TaskFlow Worker این رویداد را Claim کرده و به Job مرکزی `ProcessReminderEvent` تبدیل می‌کند؛ Handler سپس آن را به `POST /api/reminder-events` می‌فرستد.
+هر Tenant مالک تعریف یادآوری، زمان‌بندی و وضعیت اجرای یادآوری‌های خودش است. دیتابیس مرکزی فقط Jobها، صف پیامک و تاریخچه ارسال/تحویل را نگه می‌دارد؛ جدول‌های مرکزی Reminder در مسیر اجرایی جدید استفاده نمی‌شوند.
 
-API با `ReminderEventInbox.EventId` تکرار رویداد را کنترل می‌کند و براساس Ruleهای فعال در `dbo.ReminderEventRules` یک یا چند ردیف در `dbo.ReminderSchedules` می‌سازد. Tenant Reminder Sync این Scheduleها را به دیتابیس مرکزی منتقل می‌کند و Reminder Scheduler اجرای زمان‌بندی‌شده را انجام می‌دهد.
+جریان `RepairCompleted`:
 
-برای راه‌اندازی end-to-end:
-1. Migrationهای Outbox، Reminder Schedule و Reminder Event Rules را روی هر Tenant DB اجرا کنید.
-2. جدول `dbo.ReminderEventRules` را برای `RepairCompleted` با Templateهای متناسب با کسب‌وکار تنظیم کنید.
-3. Worker را با MasterRepair Registry، تنظیمات رمزگشایی رمز Tenantها، `TaskFlowApi__BaseUrl` و `TaskFlowApi__ApiKey` پیکربندی کنید.
-4. `Outbox__Enabled=true` را فقط پس از تست اتصال و رمزنگاری فعال کنید.
+1. Repair رویداد تکمیل تعمیر را در Outbox همان دیتابیس Tenant و در تراکنش تغییر وضعیت سفارش ثبت می‌کند.
+2. Worker رویداد را با `EventId` به Job مرکزی `ProcessReminderEvent` تبدیل می‌کند.
+3. `ProcessReminderEventHandler` مستقیماً به دیتابیس Tenant متصل می‌شود و در یک تراکنش، Inbox رویداد و Scheduleهای حاصل از Rule را ثبت می‌کند.
+4. `TenantReminderSchedulerService` زمان‌های سررسیدشده را در دیتابیس Tenant پردازش می‌کند و Occurrence و Outbox اجرای آن را اتمیک می‌سازد.
+5. Dispatcher رویداد Outbox را به Job مرکزی `ExecuteReminder` تبدیل می‌کند؛ Handler با idempotency، رکورد پیامک و Job ارسال را ایجاد می‌کند.
+6. `SendSmsHandler` وضعیت یادآوری را در Tenant دوباره بررسی می‌کند و پیام را به ParsGreen می‌فرستد.
+7. رویدادهای مرکزی `dbo.SmsLogs` توسط `TenantSmsLogSyncService` با شناسه یکتای رویداد به `notification.SmsLogs` همان Tenant منتقل می‌شوند.
 
-Outbox انتقال at-least-once با ثبت مرکزی idempotent فراهم می‌کند؛ تحویل دقیقاً یک‌باره SMS توسط Provider خارجی تضمین نمی‌شود. اجرای SQL Server integration tests و تطبیق رمزنگاری MasterRepair قبل از Production الزامی است.
+همه مسیرهای Worker که به یک Tenant دسترسی عملیاتی دارند از قفل Exclusive مبتنی بر `sp_getapplock` استفاده می‌کنند؛ دو Worker نمی‌توانند یک Tenant را هم‌زمان پردازش کنند، اما Tenantهای مختلف موازی پردازش می‌شوند.
+
+برای جزئیات تنظیمات و ترتیب کامل Migrationهای مرکزی و Tenant، به [راهنمای Worker](worker/README.md) مراجعه کنید. در این نسخه Worker برای پردازش Reminder مستقیماً به دیتابیس Tenant متصل می‌شود و به `TaskFlowApi__BaseUrl` یا `TaskFlowApi__ApiKey` وابسته نیست.
+
+Reminder تکرارشونده باید سقف مشخص `maxOccurrences` داشته باشد. API و Scheduler تکرار نامحدود را نمی‌پذیرند؛ Migration Tenant شماره 009 داده‌های قدیمی بدون سقف را به 12 نوبت محدود می‌کند.
+
+Outbox انتقال at-least-once با ثبت مرکزی idempotent فراهم می‌کند؛ تحویل دقیقاً یک‌باره SMS توسط Provider خارجی تضمین نمی‌شود. Build موفق جایگزین تست SQL Server واقعی و تست End-to-End نیست.
 
 ## وضعیت
 این پروژه هنوز نیازمند تست end-to-end روی SQL Server واقعی، تأیید رمزنگاری MasterRepair و تطبیق قرارداد Provider پیامک است. موفقیت Build به‌تنهایی به معنی تأیید عملکرد Production نیست.
