@@ -162,7 +162,7 @@ public sealed class ProcessReminderEventHandler(
                          1, 1, @NextRunAtUtc, SYSUTCDATETIME(), SYSUTCDATETIME());
                     """, connection, transaction);
                 insertSchedule.Parameters.Add("@ReminderType", SqlDbType.NVarChar, 100).Value = rule.ReminderType;
-                insertSchedule.Parameters.Add("@SourceEntity", SqlDbType.NVarChar, 100).Value = rule.SourceEntity;
+                insertSchedule.Parameters.Add("@SourceEntity", SqlDbType.NVarChar, 100).Value = e.SourceEntity;
                 insertSchedule.Parameters.Add("@SourceEntityId", SqlDbType.BigInt).Value = sourceEntityId;
                 insertSchedule.Parameters.Add("@RuleJson", SqlDbType.NVarChar, -1).Value = ruleJson;
                 insertSchedule.Parameters.Add("@TimeZoneId", SqlDbType.NVarChar, 100).Value = rule.TimeZoneId;
