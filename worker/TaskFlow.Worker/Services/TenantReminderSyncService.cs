@@ -74,7 +74,7 @@ public sealed class TenantReminderSyncService(
 
             try
             {
-                var result = await SyncTenantAsync(tenant, ct);
+                var result = await SyncTenantCoreAsync(tenant, ct);
 
                 if (result.Inserted > 0 || result.Updated > 0)
                 {
@@ -118,7 +118,13 @@ public sealed class TenantReminderSyncService(
         }
     }
 
-    private async Task<SyncResult> SyncTenantAsync(TenantDatabase tenant, CancellationToken ct)
+    public async Task SyncTenantAsync(TenantDatabase tenant, CancellationToken ct)
+    {
+        var result = await SyncTenantCoreAsync(tenant, ct);
+        logger.LogInformation("Reminder projection refreshed for TenantId {TenantId}, TenantDatabaseId {TenantDatabaseId}. Read={Read}, Inserted={Inserted}, Updated={Updated}.", tenant.TenantId, tenant.TenantDatabaseId, result.Read, result.Inserted, result.Updated);
+    }
+
+    private async Task<SyncResult> SyncTenantCoreAsync(TenantDatabase tenant, CancellationToken ct)
     {
         await using var source = await tenantConnections.OpenAsync(tenant, ct);
         var schedules = new List<TenantReminderSchedule>();
