@@ -6,7 +6,7 @@
 - .NET 10 SDK برای Build/Publish
 - دسترسی شبکه‌ای Worker به SQL Server و دیتابیس TaskFlow
 - دسترسی شبکه‌ای به MasterRepair و دیتابیس‌های عملیاتی Tenantها
-- دسترسی خروجی HTTPS به SMS Gateway و TaskFlow API
+- دسترسی خروجی HTTPS به SMS Gateway
 
 ## تنظیمات اصلی
 
@@ -18,10 +18,6 @@
 - `Worker__WorkerId`: شناسه این Process
 - `Worker__MaxConcurrency`: سقف کلی Jobهای هم‌زمان
 - `SmsGateway__BaseUrl=https://sms.parsgreen.ir/`, `SmsGateway__SendPath=Apiv2/Message/SendSms`, `SmsGateway__ApiKey`: اتصال ParsGreen (کلید فقط در Secret Store/Environment)
-- `TaskFlowApi__BaseUrl`: آدرس پایه Next.js TaskFlow
-- `TaskFlowApi__ReminderEventsPath=/api/reminder-events`
-- `TaskFlowApi__ApiKey`: همان کلید سروری که TaskFlow API در `TASKFLOW_API_KEY` می‌پذیرد
-- `TaskFlowApi__TimeoutSeconds=20`
 
 ## رفتار اجرا
 - Queueهای فعال از `dbo.JobQueues` خوانده می‌شوند.
@@ -45,63 +41,55 @@ Outbox Dispatcher در همان Worker Process اجرا می‌شود. از Mast
 
 پیش از فعال‌سازی، `database/tenant/001_outbox_schema.sql` را روی تمام Tenant DBها اجرا کنید. Dispatcher رکوردها را با Lease اتمیک Claim می‌کند و با `EventId` به‌عنوان idempotency key در صف مرکزی ثبت می‌کند. خطاهای موقت با backoff retry می‌شوند و بعد از اتمام تلاش‌ها به Dead می‌روند.
 
-## Business Event -> Reminder
+## Tenant-owned Reminder pipeline
 
-Handler با نام `ProcessReminderEvent` رویدادهای دامنه را از صف مرکزی به `POST /api/reminder-events` می‌فرستد. این Handler:
-- TenantId داخل payload را با TenantId خود Job مقایسه می‌کند.
-- فقط HTTPS را در محیط غیرمحلی قبول می‌کند.
-- API key را فقط در Header `x-taskflow-api-key` می‌فرستد.
-- هر پاسخ 2xx از جمله پاسخ duplicate را موفق تلقی می‌کند.
-- timeout و پاسخ غیر 2xx را به Queue برمی‌گرداند تا Job طبق سیاست Retry دوباره اجرا شود.
+یادآوری‌ها در دیتابیس عملیاتی هر Tenant نگهداری و پردازش می‌شوند؛ دیتابیس مرکزی فقط صف Jobها، پیامک‌ها و رویدادهای ارسال/تحویل را نگه می‌دارد. جدول‌های مرکزی `ReminderSchedules` و `ReminderOccurrences` در مسیر اجرایی جدید استفاده نمی‌شوند.
 
-### تنظیم روی Windows Service
+جریان اجرا:
 
-برای سرویس ویندوز از متغیرهای Machine استفاده کنید؛ متغیرهای `$env:` در PowerShell فقط به همان Process و فرزندان آن محدود هستند. دستورات زیر را در PowerShell با دسترسی Administrator اجرا کنید و مقادیر واقعی را از محیط استقرار دریافت کنید:
+1. رویداد دامنه مانند `RepairCompleted` از Outbox دیتابیس Tenant به Job مرکزی `ProcessReminderEvent` تبدیل می‌شود.
+2. `ProcessReminderEventHandler` مستقیماً به دیتابیس همان Tenant وصل می‌شود؛ `ReminderEventInbox` را برای idempotency و `ReminderEventRules` را برای ساخت `ReminderSchedules` می‌خواند و همه تغییرات را در یک تراکنش Tenant ثبت می‌کند.
+3. `TenantReminderSchedulerService` زمان‌بندی‌های سررسیدشده را در Tenant Claim می‌کند و ایجاد `ReminderOccurrences`، جلو بردن زمان بعدی و درج Outbox را در یک تراکنش محلی انجام می‌دهد.
+4. `OutboxDispatcherService` رویداد را با کلید یکتا به Job مرکزی `ExecuteReminder` تبدیل می‌کند.
+5. `ExecuteReminderHandler` وضعیت Schedule و Occurrence را از Tenant می‌خواند و با کلید idempotency یکتا، `SmsMessages` و Job نوع `SendSms` را در دیتابیس مرکزی ایجاد می‌کند.
+6. `SendSmsHandler` قبل از ارسال، وضعیت یادآوری را دوباره در Tenant بررسی می‌کند و سپس پیام را برای ParsGreen ارسال می‌کند.
+7. رویدادهای ثبت‌شده در central `dbo.SmsLogs` توسط `TenantSmsLogSyncService` به `notification.SmsLogs` همان Tenant منتقل می‌شوند. انتقال بعد از ثبت موفق در Tenant علامت‌گذاری می‌شود و در صورت توقف Worker قابل تکرار است.
 
-```powershell
-[Environment]::SetEnvironmentVariable("TaskFlowApi__BaseUrl", "https://YOUR-TASKFLOW-HOST", "Machine")
-[Environment]::SetEnvironmentVariable("TaskFlowApi__ReminderEventsPath", "/api/reminder-events", "Machine")
-[Environment]::SetEnvironmentVariable("TaskFlowApi__TimeoutSeconds", "20", "Machine")
-[Environment]::SetEnvironmentVariable("SmsGateway__BaseUrl", "https://sms.parsgreen.ir/", "Machine")
-[Environment]::SetEnvironmentVariable("SmsGateway__SendPath", "Apiv2/Message/SendSms", "Machine")
-[Environment]::SetEnvironmentVariable("SmsGateway__TimeoutSeconds", "20", "Machine")
+### انحصار پردازش Tenant
 
-# API key باید دقیقاً با TASKFLOW_API_KEY در محیط Next.js TaskFlow یکسان باشد.
-# مقدار را در Git، appsettings.json یا command history قرار ندهید.
-$secureKey = Read-Host "Enter the TaskFlow TASKFLOW_API_KEY" -AsSecureString
-$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
-try {
-    $plainKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
-    [Environment]::SetEnvironmentVariable("TaskFlowApi__ApiKey", $plainKey, "Machine")
-}
-finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
-    $plainKey = $null
-}
+تمام Worker pathهایی که به دیتابیس Tenant دسترسی عملیاتی دارند از `TenantDatabaseLock` و `sp_getapplock` با قفل Exclusive و Session ownership استفاده می‌کنند. در نتیجه دو Worker نمی‌توانند هم‌زمان یک Tenant را پردازش کنند؛ پردازش Tenantهای متفاوت همچنان موازی است. اتصال SQL تا پایان عملیات باز می‌ماند تا قفل آزاد نشود.
 
-# ابتدا false بماند. پس از تأیید API، DBها، Rule و تنظیمات Tenant:
-[Environment]::SetEnvironmentVariable("Outbox__Enabled", "false", "Machine")
-```
+### محدودیت تکرار یادآوری
 
-همچنین `TASKFLOW_API_KEY` باید در Secret Store/Environment خود Next.js TaskFlow تنظیم شده باشد. مقدار Worker و Web باید دقیقاً یکسان باشد. بعد از تنظیم متغیرهای Machine، سرویس Worker را Restart کنید تا Environment جدید را دریافت کند.
+هر Schedule تکرارشونده باید `maxOccurrences` بین 1 تا 1000 داشته باشد. API مقدار نامحدود را نمی‌پذیرد و Scheduler نیز داده‌های قدیمی بدون سقف را اجرا نمی‌کند. Migration شماره 009، Ruleها و Scheduleهای تکرارشونده قدیمی بدون سقف را به 12 نوبت محدود می‌کند؛ این مقدار را در صورت نیاز می‌توان برای هر Rule تغییر داد.
 
-برای فعال‌سازی Outbox فقط پس از preflight:
-```powershell
-[Environment]::SetEnvironmentVariable("Outbox__Enabled", "true", "Machine")
-Restart-Service -Name TaskFlowWorker
-```
+### Migrationهای Tenant
 
-اتصال‌های `TenantRegistry__ConnectionString` و `TenantPasswordEncryption__KeyBase64` نیز باید از Secret Store یا Environment امن Worker تأمین شوند؛ مقادیر واقعی را در مخزن ثبت نکنید.
+اسکریپت‌ها را به ترتیب و روی هر دیتابیس عملیاتی Tenant اجرا کنید. اسکریپت Seed را فقط پس از ایجاد جدول Rule اجرا کنید:
 
-در Repair، رویداد `RepairCompleted` در همان تراکنش تغییر وضعیت به `Repaired` در `dbo.OutboxMessages` ثبت می‌شود. Worker آن را به Job مرکزی `ProcessReminderEvent` تبدیل می‌کند. API رویداد در Tenant DB، `ReminderEventInbox` و `ReminderSchedules` را به‌صورت idempotent ثبت می‌کند؛ سرویس Tenant Reminder Sync سپس Schedule را به دیتابیس مرکزی منتقل می‌کند.
-
-پیش از فعال‌سازی، migrationهای زیر باید روی هر Tenant DB اجرا شده باشند:
 1. `database/tenant/001_outbox_schema.sql`
 2. `database/tenant/002_reminder_schedules.sql`
 3. `database/tenant/003_reminder_event_rules.sql`
-4. `database/tenant/004_seed_repair_completed_rule.sql`
+4. `database/tenant/004_reminder_event_cancellation_limits.sql`
+5. `database/tenant/005_move_reminder_tables_to_notification.sql` (برای دیتابیس‌هایی که جدول‌های قدیمی در schema dbo دارند؛ قبل از اجرا وجود هم‌زمان جدول در هر دو schema را بررسی کنید)
+6. `database/tenant/004_seed_repair_completed_rule.sql`
+7. `database/tenant/006_order_selected_service_reminder_delay.sql`
+8. `database/tenant/007_reminder_occurrences.sql`
+9. `database/tenant/008_sms_delivery_logs.sql`
+10. `database/tenant/009_reminder_finite_recurrence.sql`
 
-پس از Migrationها، اسکریپت `004_seed_repair_completed_rule.sql` را روی هر Tenant DB اجرا کنید. این اسکریپت Rule یکتای `RepairCompletedFollowUp` را با تأخیر پیش‌فرض 4320 دقیقه (سه روز)، TimeZone پیش‌فرض `Asia/Tehran` و ارسال یک‌باره ایجاد یا به‌روزرسانی می‌کند. TimeZone و متن پیام را قبل از اجرا با سیاست واقعی هر کسب‌وکار تطبیق دهید. Placeholderهای قابل استفاده در این event عبارت‌اند از `{{customerMobile}}`, `{{customerName}}`, `{{repairOrderNumber}}`.
+Seed فعلی رویداد `RepairCompleted` را به یک یادآوری یک‌باره تبدیل می‌کند؛ تأخیر سرویس از فیلد `serviceReminderIntervalMonths` سفارش تعمیر می‌آید و فقط مقادیر 3، 6 یا 12 ماه پذیرفته می‌شود. رویدادهای لغو تعریف‌شده در Rule، Schedule را غیرفعال و نسخه آن را افزایش می‌دهند تا پیامک صف‌شده اما ارسال‌نشده نیز قبل از ارسال دوباره اعتبارسنجی شود.
+
+### Migrationهای دیتابیس مرکزی
+
+روی دیتابیس `TaskFlow` نیز این Migrationها لازم‌اند:
+
+- `database/006_sms_delivery_tracking.sql`
+- `database/008_sms_idempotency_billing_foundation.sql`
+- `database/009_sms_tenant_database_reference.sql`
+- `database/010_sms_tenant_log_outbox.sql`
+
+Billing در این نسخه فعال نیست؛ فیلدهای قیمت و هزینه صرفاً برای ثبت Snapshot در نسخه آتی آماده شده‌اند. Migration مرکزی 010 ستون `TenantSyncedAt` را برای Outbox تاریخچه پیامک اضافه می‌کند.
 
 ## محدودیت‌ها و راه‌اندازی
 - Outbox انتقال at-least-once با ثبت مرکزی idempotent فراهم می‌کند؛ ارسال SMS به Provider دقیقاً یک‌بار تضمین نمی‌شود.
