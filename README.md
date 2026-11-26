@@ -16,13 +16,13 @@
    - `database/002_schema.sql`
    - `database/003_seed.sql`
    - `database/004_procedures.sql`
-   - `database/005_tenant_reminder_sync.sql`
    - `database/006_sms_delivery_tracking.sql` (SMS submission and ParsGreen delivery tracking)
    - `database/008_sms_idempotency_billing_foundation.sql`
    - `database/009_sms_tenant_database_reference.sql`
    - `database/010_sms_tenant_log_outbox.sql`
+   - `database/008_sms_delivery_logs.sql` (اجرا روی هر دیتابیس Tenant، نه دیتابیس مرکزی)
 4. اسکریپت‌های `database/tenant` را به ترتیب روی هر دیتابیس عملیاتی Tenant اجرا کنید.
-5. برای دیتابیس مرکزی قدیمی که Migrationهای 005 یا 007 یادآوری را قبلاً اجرا کرده است، Migration `database/011_archive_legacy_central_reminders.sql` را اجرا کنید تا جداول Projection قدیمی با حفظ داده‌ها آرشیو شوند. این Migration برای دیتابیس تازه‌ای که از Schema اصلاح‌شده ساخته شده لازم نیست.
+5. برای دیتابیس مرکزی قدیمی که Migrationهای تاریخی `005_tenant_reminder_sync.sql` یا `007_reminder_schedule_occurrence_count.sql` را قبلاً اجرا کرده است، پس از اطمینان از انتقال داده‌های موردنیاز به دیتابیس Tenant، Migration `database/011_archive_legacy_central_reminders.sql` را اجرا کنید. این Migration جداول قدیمی را با حفظ داده‌ها آرشیو می‌کند؛ در نصب تازه Migrationهای 005 و 007 را اجرا نکنید.
 6. سپس `npm install` و `npm run dev` را اجرا کنید.
 
 ## Worker
