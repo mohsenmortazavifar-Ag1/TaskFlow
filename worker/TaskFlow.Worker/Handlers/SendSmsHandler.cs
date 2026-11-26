@@ -15,6 +15,9 @@ namespace TaskFlow.Worker.Handlers;
 /// </summary>
 public sealed class SendSmsHandler(
     JobRepository jobs,
+    TenantRegistryRepository tenantRegistry,
+    TenantSqlConnectionFactory tenantConnections,
+    TenantDatabaseLock tenantLock,
     ISmsGateway gateway,
     IOptions<SmsDeliveryOptions> deliveryOptions,
     ILogger<SendSmsHandler> logger) : IJobHandler
@@ -41,6 +44,26 @@ public sealed class SendSmsHandler(
 
         await using var connection = await jobs.OpenConnectionAsync(cancellationToken);
 
+        long tenantDatabaseId;
+        await using (var tenantIdCommand = new SqlCommand("""
+            SELECT TenantDatabaseId FROM dbo.SmsMessages
+            WHERE SmsMessageId = @SmsMessageId AND TenantId = @TenantId;
+            """, connection))
+        {
+            tenantIdCommand.Parameters.Add("@SmsMessageId", SqlDbType.BigInt).Value = smsMessageId;
+            tenantIdCommand.Parameters.Add("@TenantId", SqlDbType.BigInt).Value = tenantId;
+            var value = await tenantIdCommand.ExecuteScalarAsync(cancellationToken);
+            if (value is null || value is DBNull)
+                throw new InvalidOperationException($"SMS {smsMessageId} has no owning TenantDatabaseId. Apply migration 009 and republish the job.");
+            tenantDatabaseId = Convert.ToInt64(value);
+        }
+
+        var tenant = await tenantRegistry.GetActiveDatabaseAsync(tenantId, tenantDatabaseId, cancellationToken)
+            ?? throw new InvalidOperationException($"Active TenantDatabaseId {tenantDatabaseId} was not found for TenantId {tenantId}.");
+        await using var tenantConnection = await tenantConnections.OpenAsync(tenant, cancellationToken);
+        await using var tenantLease = await tenantLock.AcquireAsync(
+            tenantConnection, tenantDatabaseId, $"job:{job.JobId}", cancellationToken);
+
         // A reminder can be cancelled after its ExecuteReminder job created the SMS job.
         // Recheck the schedule immediately before claiming the SMS for provider submission.
         if (reminderOccurrenceId.HasValue)
@@ -49,20 +72,21 @@ public sealed class SendSmsHandler(
                 SELECT CASE WHEN EXISTS
                 (
                     SELECT 1
-                    FROM dbo.ReminderOccurrences o
-                    INNER JOIN dbo.ReminderSchedules s
+                    FROM notification.ReminderOccurrences o
+                    INNER JOIN notification.ReminderSchedules s
                         ON s.ReminderScheduleId = o.ReminderScheduleId
                     WHERE o.ReminderOccurrenceId = @OccurrenceId
                       AND o.Status = 2
                       AND o.ScheduleVersion = s.ScheduleVersion
                       AND s.IsEnabled = 1
                 ) THEN 1 ELSE 0 END;
-                """, connection);
+                """, tenantConnection);
             reminderCheck.Parameters.Add("@OccurrenceId", SqlDbType.BigInt).Value = reminderOccurrenceId.Value;
             if (Convert.ToInt32(await reminderCheck.ExecuteScalarAsync(cancellationToken)) != 1)
             {
                 await MarkReminderSmsCancelledAsync(
                     connection, smsMessageId, tenantId, reminderOccurrenceId.Value, cancellationToken);
+                await MirrorSmsLogsToTenantAsync(connection, tenantConnection, smsMessageId, cancellationToken);
                 logger.LogInformation(
                     "Skipping SMS message {SmsMessageId}: reminder occurrence {OccurrenceId} was cancelled or superseded before submission.",
                     smsMessageId, reminderOccurrenceId.Value);
@@ -104,6 +128,7 @@ public sealed class SendSmsHandler(
         // reconciliation; Accepted is handled only by the delivery checker.
         if (submissionState != 0)
         {
+            await MirrorSmsLogsToTenantAsync(connection, tenantConnection, smsMessageId, cancellationToken);
             logger.LogWarning(
                 "Skipping SendSms job {JobId}: SmsMessage {SmsMessageId} has SubmissionState {State}; no provider request will be repeated.",
                 job.JobId, smsMessageId, submissionState);
@@ -174,12 +199,14 @@ public sealed class SendSmsHandler(
         catch (SmsProviderRejectedException ex)
         {
             await PersistSubmissionFailureAsync(connection, sms, 3, "ProviderRejected", ex.Message);
+            await MirrorSmsLogsToTenantAsync(connection, tenantConnection, smsMessageId, cancellationToken);
             logger.LogWarning(ex, "ParsGreen rejected SMS message {SmsMessageId}.", sms.SmsMessageId);
             return;
         }
         catch (SmsSubmissionOutcomeUnknownException ex)
         {
             await PersistSubmissionFailureAsync(connection, sms, 4, "SubmissionUnknown", ex.Message);
+            await MirrorSmsLogsToTenantAsync(connection, tenantConnection, smsMessageId, cancellationToken);
             logger.LogError(ex,
                 "SMS message {SmsMessageId} has an ambiguous provider outcome. Automatic resend is blocked.",
                 sms.SmsMessageId);
@@ -232,11 +259,64 @@ public sealed class SendSmsHandler(
             update.Parameters.Add("@Description", SqlDbType.NVarChar, 1000).Value = acceptedDescription;
             await update.ExecuteNonQueryAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            await MirrorSmsLogsToTenantAsync(connection, tenantConnection, smsMessageId, cancellationToken);
         }
         catch
         {
             await transaction.RollbackAsync(CancellationToken.None);
             throw;
+        }
+    }
+
+    private static async Task MirrorSmsLogsToTenantAsync(
+        SqlConnection centralConnection, SqlConnection tenantConnection, long smsMessageId, CancellationToken ct)
+    {
+        var logs = new List<(string Mobile, string Message, string EventType, string? ProviderCode,
+            string? ProviderMessageId, string Description, DateTime? SentAt)>();
+        await using (var read = new SqlCommand("""
+            SELECT m.Mobile, m.Message, l.EventType, l.ProviderCode, l.ProviderMessageId,
+                   l.Description, COALESCE(m.AcceptedAt, m.SubmissionStartedAt)
+            FROM dbo.SmsLogs l
+            INNER JOIN dbo.SmsMessages m ON m.SmsMessageId = l.SmsMessageId
+            WHERE l.SmsMessageId = @SmsMessageId
+            ORDER BY l.SmsLogId;
+            """, centralConnection))
+        {
+            read.Parameters.Add("@SmsMessageId", SqlDbType.BigInt).Value = smsMessageId;
+            await using var reader = await read.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                logs.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.IsDBNull(5) ? "" : reader.GetString(5),
+                    reader.IsDBNull(6) ? null : reader.GetDateTime(6)));
+        }
+
+        foreach (var log in logs)
+        {
+            await using var insert = new SqlCommand("""
+                IF NOT EXISTS
+                (
+                    SELECT 1 FROM notification.SmsLogs
+                    WHERE TaskFlowSmsMessageId = @SmsMessageId AND EventType = @EventType
+                )
+                INSERT notification.SmsLogs
+                    (Mobile, Message, Status, ProviderMessageId, ErrorMessage, SentAt,
+                     TaskFlowSmsMessageId, EventType, ProviderCode)
+                VALUES
+                    (@Mobile, @Message, @EventType, @ProviderMessageId,
+                     CASE WHEN @EventType IN (N'ProviderRejected', N'SubmissionUnknown') THEN @Description ELSE NULL END,
+                     @SentAt, @SmsMessageId, @EventType, @ProviderCode);
+                """, tenantConnection);
+            insert.Parameters.Add("@SmsMessageId", SqlDbType.BigInt).Value = smsMessageId;
+            insert.Parameters.Add("@EventType", SqlDbType.NVarChar, 50).Value = log.EventType;
+            insert.Parameters.Add("@Mobile", SqlDbType.NVarChar, 20).Value = log.Mobile;
+            insert.Parameters.Add("@Message", SqlDbType.NVarChar, 2000).Value = log.Message;
+            insert.Parameters.Add("@ProviderMessageId", SqlDbType.NVarChar, 300).Value = (object?)log.ProviderMessageId ?? DBNull.Value;
+            insert.Parameters.Add("@Description", SqlDbType.NVarChar, 2000).Value = log.Description;
+            insert.Parameters.Add("@SentAt", SqlDbType.DateTime2).Value = (object?)log.SentAt ?? DBNull.Value;
+            insert.Parameters.Add("@ProviderCode", SqlDbType.NVarChar, 100).Value = (object?)log.ProviderCode ?? DBNull.Value;
+            await insert.ExecuteNonQueryAsync(ct);
         }
     }
 
