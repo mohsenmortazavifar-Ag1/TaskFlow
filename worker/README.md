@@ -71,12 +71,12 @@ Outbox Dispatcher در همان Worker Process اجرا می‌شود. از Mast
 2. `database/tenant/002_reminder_schedules.sql`
 3. `database/tenant/003_reminder_event_rules.sql`
 4. `database/tenant/004_reminder_event_cancellation_limits.sql`
-5. `database/tenant/005_move_reminder_tables_to_notification.sql` (برای دیتابیس‌هایی که جدول‌های قدیمی در schema dbo دارند؛ قبل از اجرا وجود هم‌زمان جدول در هر دو schema را بررسی کنید)
-6. `database/tenant/004_seed_repair_completed_rule.sql`
-7. `database/tenant/006_order_selected_service_reminder_delay.sql`
-8. `database/tenant/007_reminder_occurrences.sql`
-9. `database/tenant/008_sms_delivery_logs.sql`
-10. `database/tenant/009_reminder_finite_recurrence.sql`
+5. `database/tenant/006_move_reminder_tables_to_notification.sql` (برای دیتابیس‌هایی که جدول‌های قدیمی در schema dbo دارند؛ قبل از اجرا وجود هم‌زمان جدول در هر دو schema را بررسی کنید)
+5. `database/tenant/005_seed_repair_completed_rule.sql`
+7. `database/tenant/007_order_selected_service_reminder_delay.sql`
+8. `database/tenant/008_reminder_occurrences.sql`
+9. `database/tenant/009_sms_delivery_logs.sql`
+10. `database/tenant/010_reminder_finite_recurrence.sql`
 
 Seed فعلی رویداد `RepairCompleted` را به یک یادآوری یک‌باره تبدیل می‌کند؛ تأخیر سرویس از فیلد `serviceReminderIntervalMonths` سفارش تعمیر می‌آید و فقط مقادیر 3، 6 یا 12 ماه پذیرفته می‌شود. رویدادهای لغو تعریف‌شده در Rule، Schedule را غیرفعال و نسخه آن را افزایش می‌دهند تا پیامک صف‌شده اما ارسال‌نشده نیز قبل از ارسال دوباره اعتبارسنجی شود.
 
