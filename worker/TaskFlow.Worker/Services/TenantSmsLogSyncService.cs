@@ -84,6 +84,9 @@ public sealed class TenantSmsLogSyncService(
 
                 foreach (var log in group)
                 {
+                    var tenantStatus = MapTenantStatus(log.EventType);
+                    var errorMessage = IsErrorEvent(log.EventType) ? log.Description : null;
+
                     await using (var insert = new SqlCommand("""
                         IF NOT EXISTS
                         (
@@ -94,19 +97,18 @@ public sealed class TenantSmsLogSyncService(
                             (Mobile, Message, Status, ProviderMessageId, ErrorMessage, SentAt,
                              TaskFlowSmsMessageId, TaskFlowSmsLogId, EventType, ProviderCode, ProviderStatus)
                         VALUES
-                            (@Mobile, @Message, @EventType, @ProviderMessageId,
-                             CASE WHEN @EventType IN (N'ProviderRejected', N'SubmissionUnknown',
-                                 N'DeliveryUnknown', N'DeliveryUnconfirmed', N'Undelivered') THEN @Description ELSE NULL END,
-                             @SentAt, @SmsMessageId, @SmsLogId, @EventType, @ProviderCode, @ProviderStatus);
+                            (@Mobile, @Message, @Status, @ProviderMessageId, @ErrorMessage, @SentAt,
+                             @SmsMessageId, @SmsLogId, @EventType, @ProviderCode, @ProviderStatus);
                         """, tenantConnection))
                     {
                         insert.Parameters.Add("@SmsMessageId", SqlDbType.BigInt).Value = log.SmsMessageId;
                         insert.Parameters.Add("@SmsLogId", SqlDbType.BigInt).Value = log.SmsLogId;
                         insert.Parameters.Add("@EventType", SqlDbType.NVarChar, 50).Value = log.EventType;
+                        insert.Parameters.Add("@Status", SqlDbType.NVarChar, 50).Value = tenantStatus;
                         insert.Parameters.Add("@Mobile", SqlDbType.NVarChar, 20).Value = log.Mobile;
                         insert.Parameters.Add("@Message", SqlDbType.NVarChar, 2000).Value = log.Message;
                         insert.Parameters.Add("@ProviderMessageId", SqlDbType.NVarChar, 300).Value = (object?)log.ProviderMessageId ?? DBNull.Value;
-                        insert.Parameters.Add("@Description", SqlDbType.NVarChar, 2000).Value = log.Description.Length > 2000 ? log.Description[..2000] : log.Description;
+                        insert.Parameters.Add("@ErrorMessage", SqlDbType.NVarChar, 2000).Value = (object?)errorMessage ?? DBNull.Value;
                         insert.Parameters.Add("@SentAt", SqlDbType.DateTime2).Value = (object?)log.SentAt ?? DBNull.Value;
                         insert.Parameters.Add("@ProviderCode", SqlDbType.NVarChar, 100).Value = (object?)log.ProviderCode ?? DBNull.Value;
                         insert.Parameters.Add("@ProviderStatus", SqlDbType.Int).Value = (object?)log.ProviderStatus ?? DBNull.Value;
@@ -145,6 +147,28 @@ public sealed class TenantSmsLogSyncService(
             }
         }
     }
+
+    private static string MapTenantStatus(string eventType) => eventType switch
+    {
+        // Provider acceptance means the message has been submitted, not delivered.
+        "Accepted" or "DeliveryPending" => "Sent",
+        "Delivered" => "Delivered",
+        "ProviderRejected" or "Undelivered" or "ReminderCancelled" => "Failed",
+
+        // These events explicitly represent an unresolved outcome. Do not label them
+        // Sent or Failed because neither provider acceptance nor delivery is confirmed.
+        "SubmissionUnknown" or "DeliveryUnknown" or
+        "DeliveryUnconfirmed" or "DeliveryCheckUnconfirmed" => "Pending",
+
+        // Unknown events must not be silently assigned a misleading lifecycle status.
+        _ => throw new InvalidOperationException(
+            $"Unsupported SMS log event type '{eventType}'. Add an explicit tenant status mapping before synchronizing it.")
+    };
+
+    private static bool IsErrorEvent(string eventType) => eventType is
+        "ProviderRejected" or "SubmissionUnknown" or "Undelivered" or
+        "DeliveryUnknown" or "DeliveryUnconfirmed" or "DeliveryCheckUnconfirmed" or
+        "ReminderCancelled";
 
     private async Task DeferTenantLogsAsync(long tenantDatabaseId, int delayMinutes, string error, CancellationToken ct)
     {
