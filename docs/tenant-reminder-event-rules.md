@@ -55,6 +55,6 @@ For `RepairCompletedFollowUp`, migration `database/tenant/007_order_selected_ser
 
 The due date is calculated from the event's `occurredAtUtc` in the rule's `TimeZoneId`, clamping month-end dates (for example, November 30 plus three months becomes February 28/29). The schedule is one-shot: no recurrence interval is stored, so the scheduler clears `NextRunAtUtc` after materializing its single occurrence. The rule also uses `MaxOccurrences = 1`.
 
-Apply `004_seed_repair_completed_rule.sql` first, then `006_order_selected_service_reminder_delay.sql` to every Repair tenant database. The latter invalidates any previous fixed-delay schedules for this rule directly in the Tenant database; no central projection or sync process is involved.
+Apply `005_seed_repair_completed_rule.sql` first, then `007_order_selected_service_reminder_delay.sql` to every Repair tenant database. The latter invalidates any previous fixed-delay schedules for this rule directly in the Tenant database; no central projection or sync process is involved.
 
 Repair emits the selected interval only on the `RepairCompleted` event created by the transition to `Repaired`. If the order preference is disabled, the dynamic rule is skipped and no follow-up schedule is created. Moving the order back to repair, delivering it, or cancelling it disables any active schedule.
