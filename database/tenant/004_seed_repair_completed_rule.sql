@@ -22,7 +22,7 @@ DECLARE @DelayMinutes int = 4320;
 DECLARE @TimeZoneId nvarchar(100) = N'Asia/Tehran';
 DECLARE @MobileTemplate nvarchar(100) = N'{{customerMobile}}';
 DECLARE @MessageTemplate nvarchar(2000) =
-    N'سلام {{customerName}} عزیز، سه روز از تکمیل تعمیر دستگاه با شماره رسید {{repairOrderNumber}} گذشته است. در صورت بروز مشکل یا نیاز به پیگیری، با ما تماس بگیرید.';
+    N'سلام {{customerName}} عزیز، زمان سرویس دوره‌ای دستگاه شما فرا رسیده است. دستگاه: {{deviceName}}. تعمیرگاه {{branchName}} - تماس: {{branchPhone}}';
 
 BEGIN TRY
     BEGIN TRANSACTION;
