@@ -1,6 +1,6 @@
 # Tenant reminder event rules
 
-The tenant outbox, reminder schedules, occurrences, event rules and event inbox are stored in the `notification` schema of each operational Tenant database. For a fresh tenant, run the tenant migrations in order. Apply `database/tenant/005_move_reminder_tables_to_notification.sql` only when upgrading a tenant database that still has the legacy reminder/outbox tables in `dbo`. The central TaskFlow database does not need reminder tables or reminder-specific migrations.
+The tenant outbox, reminder schedules, occurrences, event rules and event inbox are stored in the `notification` schema of each operational Tenant database. For a fresh tenant, run the tenant migrations in order. Apply `database/tenant/006_move_reminder_tables_to_notification.sql` only when upgrading a tenant database that still has the legacy reminder/outbox tables in `dbo`. The central TaskFlow database does not need reminder tables or reminder-specific migrations.
 
 ## Event contracts
 
@@ -51,7 +51,7 @@ Replace the rule ID and message with the tenant's actual rule and approved text.
 
 ## Repair-order-selected one-time service reminder
 
-For `RepairCompletedFollowUp`, migration `database/tenant/006_order_selected_service_reminder_delay.sql` changes the rule to read `serviceReminderIntervalMonths` from the event payload. Repair sends this value only when the operator enabled the reminder for that repair order. Supported values are 3, 6, and 12 calendar months.
+For `RepairCompletedFollowUp`, migration `database/tenant/007_order_selected_service_reminder_delay.sql` changes the rule to read `serviceReminderIntervalMonths` from the event payload. Repair sends this value only when the operator enabled the reminder for that repair order. Supported values are 3, 6, and 12 calendar months.
 
 The due date is calculated from the event's `occurredAtUtc` in the rule's `TimeZoneId`, clamping month-end dates (for example, November 30 plus three months becomes February 28/29). The schedule is one-shot: no recurrence interval is stored, so the scheduler clears `NextRunAtUtc` after materializing its single occurrence. The rule also uses `MaxOccurrences = 1`.
 
