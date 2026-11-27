@@ -65,20 +65,21 @@ Outbox Dispatcher در همان Worker Process اجرا می‌شود. از Mast
 
 ### Migrationهای Tenant
 
-اسکریپت‌ها را به ترتیب و روی هر دیتابیس عملیاتی Tenant اجرا کنید. اسکریپت Seed را فقط پس از ایجاد جدول Rule اجرا کنید:
+برای دیتابیس‌های جدید و قدیمی، اسکریپت‌های زیر را دقیقاً به همین ترتیب روی هر دیتابیس عملیاتی Tenant اجرا کنید. نسخه‌بندی اکنون پیوسته است و Seed هم یک نسخه مستقل دارد:
 
 1. `database/tenant/001_outbox_schema.sql`
 2. `database/tenant/002_reminder_schedules.sql`
 3. `database/tenant/003_reminder_event_rules.sql`
 4. `database/tenant/004_reminder_event_cancellation_limits.sql`
-5. `database/tenant/006_move_reminder_tables_to_notification.sql` (برای دیتابیس‌هایی که جدول‌های قدیمی در schema dbo دارند؛ قبل از اجرا وجود هم‌زمان جدول در هر دو schema را بررسی کنید)
 5. `database/tenant/005_seed_repair_completed_rule.sql`
+6. `database/tenant/006_move_reminder_tables_to_notification.sql` (برای انتقال جدول‌های قدیمی dbo؛ اگر جدول هم‌نام هم‌زمان در هر دو schema وجود دارد، ابتدا دستی تطبیق و ادغام شود)
 7. `database/tenant/007_order_selected_service_reminder_delay.sql`
 8. `database/tenant/008_reminder_occurrences.sql`
 9. `database/tenant/009_sms_delivery_logs.sql`
 10. `database/tenant/010_reminder_finite_recurrence.sql`
+11. `database/tenant/011_update_service_reminder_message_template.sql`
 
-Seed فعلی رویداد `RepairCompleted` را به یک یادآوری یک‌باره تبدیل می‌کند؛ تأخیر سرویس از فیلد `serviceReminderIntervalMonths` سفارش تعمیر می‌آید و فقط مقادیر 3، 6 یا 12 ماه پذیرفته می‌شود. رویدادهای لغو تعریف‌شده در Rule، Schedule را غیرفعال و نسخه آن را افزایش می‌دهند تا پیامک صف‌شده اما ارسال‌نشده نیز قبل از ارسال دوباره اعتبارسنجی شود.
+Migrationهای 001 تا 011 به‌صورت دستی روی Tenant DB اجرا می‌شوند؛ Worker پروژه TaskFlow این فایل‌ها را خودکار اجرا نمی‌کند. نسخه 006 فقط برای دیتابیس‌هایی است که ساختار قدیمی dbo را دارند؛ در نصب جدید معمولاً انتقالی انجام نمی‌دهد. Seed نسخه 005 قانون اولیه را ایجاد/به‌روزرسانی می‌کند. نسخه 007 قانون را به تأخیر یک‌باره انتخاب‌شده در سفارش (3، 6 یا 12 ماه) تبدیل می‌کند. نسخه 010 تکرارهای نامحدود قدیمی را به حداکثر 12 نوبت محدود می‌کند.
 
 ### Migrationهای دیتابیس مرکزی
 
