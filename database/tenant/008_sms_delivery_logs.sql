@@ -24,6 +24,20 @@ BEGIN
 END;
 GO
 
+/*
+  Existing tenant databases may have been created with narrower legacy columns.
+  Widen them to the same limits used by the current sync service and fresh installs.
+*/
+IF COL_LENGTH(N'notification.SmsLogs', N'Status') IS NOT NULL
+    ALTER TABLE notification.SmsLogs ALTER COLUMN Status NVARCHAR(50) NOT NULL;
+GO
+IF COL_LENGTH(N'notification.SmsLogs', N'ProviderMessageId') IS NOT NULL
+    ALTER TABLE notification.SmsLogs ALTER COLUMN ProviderMessageId NVARCHAR(300) NULL;
+GO
+IF COL_LENGTH(N'notification.SmsLogs', N'ErrorMessage') IS NOT NULL
+    ALTER TABLE notification.SmsLogs ALTER COLUMN ErrorMessage NVARCHAR(2000) NULL;
+GO
+
 IF COL_LENGTH(N'notification.SmsLogs', N'TaskFlowSmsMessageId') IS NULL
     ALTER TABLE notification.SmsLogs ADD TaskFlowSmsMessageId BIGINT NULL;
 GO
