@@ -151,14 +151,14 @@ public sealed class TenantSmsLogSyncService(
     private static string MapTenantStatus(string eventType) => eventType switch
     {
         // Provider acceptance means the message has been submitted, not delivered.
-        "Accepted" or "DeliveryPending" => "Sent",
+        "Accepted" or "DeliveryPending" or "DeliveryUnknown" or
+        "DeliveryUnconfirmed" or "DeliveryCheckUnconfirmed" => "Sent",
         "Delivered" => "Delivered",
         "ProviderRejected" or "Undelivered" or "ReminderCancelled" => "Failed",
 
-        // These events explicitly represent an unresolved outcome. Do not label them
-        // Sent or Failed because neither provider acceptance nor delivery is confirmed.
-        "SubmissionUnknown" or "DeliveryUnknown" or
-        "DeliveryUnconfirmed" or "DeliveryCheckUnconfirmed" => "Pending",
+        // SubmissionUnknown is the only current event where provider acceptance itself
+        // is ambiguous. Keep it Pending; delivery uncertainty after Accepted remains Sent. 
+        "SubmissionUnknown" => "Pending",
 
         // Unknown events must not be silently assigned a misleading lifecycle status.
         _ => throw new InvalidOperationException(
