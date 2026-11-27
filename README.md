@@ -20,7 +20,7 @@
    - `database/008_sms_idempotency_billing_foundation.sql`
    - `database/009_sms_tenant_database_reference.sql`
    - `database/010_sms_tenant_log_outbox.sql`
-4. اسکریپت‌های `database/tenant` را به ترتیب درج‌شده در `worker/README.md` روی هر دیتابیس عملیاتی Tenant اجرا کنید؛ این فهرست شامل `008_sms_delivery_logs.sql` نیز هست.
+4. اسکریپت‌های `database/tenant` را به ترتیب درج‌شده در `worker/README.md` روی هر دیتابیس عملیاتی Tenant اجرا کنید؛ این فهرست شامل `009_sms_delivery_logs.sql` نیز هست.
 5. برای دیتابیس مرکزی قدیمی که Migrationهای تاریخی `005_tenant_reminder_sync.sql` یا `007_reminder_schedule_occurrence_count.sql` را قبلاً اجرا کرده است، پس از اطمینان از انتقال داده‌های موردنیاز به دیتابیس Tenant، Migration `database/011_archive_legacy_central_reminders.sql` را اجرا کنید. این Migration جداول قدیمی را با حفظ داده‌ها آرشیو می‌کند؛ در نصب تازه Migrationهای 005 و 007 را اجرا نکنید.
 6. سپس `npm install` و `npm run dev` را اجرا کنید.
 
@@ -52,7 +52,7 @@ APIهای داخلی Job و Reminder فقط برای Backendهای مورد اع
 
 برای جزئیات تنظیمات و ترتیب کامل Migrationهای مرکزی و Tenant، به [راهنمای Worker](worker/README.md) مراجعه کنید. در این نسخه Worker برای پردازش Reminder مستقیماً به دیتابیس Tenant متصل می‌شود و به `TaskFlowApi__BaseUrl` یا `TaskFlowApi__ApiKey` وابسته نیست.
 
-Reminder تکرارشونده باید سقف مشخص `maxOccurrences` داشته باشد. API و Scheduler تکرار نامحدود را نمی‌پذیرند؛ Migration Tenant شماره 009 داده‌های قدیمی بدون سقف را به 12 نوبت محدود می‌کند.
+Reminder تکرارشونده باید سقف مشخص `maxOccurrences` داشته باشد. API و Scheduler تکرار نامحدود را نمی‌پذیرند؛ Migration Tenant شماره 010 داده‌های قدیمی بدون سقف را به 12 نوبت محدود می‌کند.
 
 Outbox انتقال at-least-once با ثبت مرکزی idempotent فراهم می‌کند؛ تحویل دقیقاً یک‌باره SMS توسط Provider خارجی تضمین نمی‌شود. Build موفق جایگزین تست SQL Server واقعی و تست End-to-End نیست.
 
