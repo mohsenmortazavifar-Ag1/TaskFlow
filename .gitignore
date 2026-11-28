@@ -1,7 +1,13 @@
-node_modules
-.next
+node_modules/
+.next/
 .env
-.env.local
-.env.*.local
-coverage
+.env.*
+!.env.example
+coverage/
 *.log
+
+# .NET build outputs
+**/bin/
+**/obj/
+.vs/
+TestResults/

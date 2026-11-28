@@ -4,30 +4,57 @@
 
 ## فناوری‌ها
 - Next.js App Router و TypeScript
-- React و lucide-react
 - SQL Server از طریق پکیج mssql
 - رابط فارسی و RTL
+- .NET 10 Worker Service مستقل برای اجرای Jobها
 
-## راه‌اندازی
-1. Node.js 20.9+ و SQL Server در دسترس داشته باشید.
-2. فایل .env.example را به .env.local کپی و تنظیمات اتصال را وارد کنید.
-3. اسکریپت‌ها را به ترتیب اجرا کنید:
-   - database/001_create_database.sql (از دیتابیس master)
-   - database/002_schema.sql (در دیتابیس TaskFlow)
-   - database/003_seed.sql
-   - database/004_procedures.sql
-4. سپس npm install و npm run dev را اجرا کنید.
-5. داشبورد در http://localhost:3000 در دسترس است.
+## راه‌اندازی وب
+1. Node.js و SQL Server را آماده کنید.
+2. فایل `.env.example` را به `.env.local` کپی و مقادیر را تنظیم کنید.
+3. اسکریپت‌های مرکزی را به ترتیب اجرا کنید:
+   - `database/001_create_database.sql`
+   - `database/002_schema.sql`
+   - `database/003_seed.sql`
+   - `database/004_procedures.sql`
+   - `database/006_sms_delivery_tracking.sql` (SMS submission and ParsGreen delivery tracking)
+   - `database/008_sms_idempotency_billing_foundation.sql`
+   - `database/009_sms_tenant_database_reference.sql`
+   - `database/010_sms_tenant_log_outbox.sql`
+4. اسکریپت‌های `database/tenant` را به ترتیب درج‌شده در `worker/README.md` روی هر دیتابیس عملیاتی Tenant اجرا کنید؛ این فهرست شامل `009_sms_delivery_logs.sql` نیز هست.
+5. برای دیتابیس مرکزی قدیمی که Migrationهای تاریخی `005_tenant_reminder_sync.sql` یا `007_reminder_schedule_occurrence_count.sql` را قبلاً اجرا کرده است، پس از اطمینان از انتقال داده‌های موردنیاز به دیتابیس Tenant، Migration `database/011_archive_legacy_central_reminders.sql` را اجرا کنید. این Migration جداول قدیمی را با حفظ داده‌ها آرشیو می‌کند؛ در نصب تازه Migrationهای 005 و 007 را اجرا نکنید.
+6. سپس `npm install` و `npm run dev` را اجرا کنید.
 
-## API
-- GET /api/health اتصال SQL Server را بررسی می‌کند.
-- GET /api/jobs?page=1&pageSize=20 فهرست Jobها را می‌دهد و مانند POST به Header با نام x-taskflow-api-key نیاز دارد.
-- POST /api/jobs برای ثبت Job به Header با نام x-taskflow-api-key نیاز دارد.
+## Worker
+Worker یک Process مستقل از Next.js است. راهنمای اجرا، تنظیمات، نصب Windows Service/Linux systemd و اتصال به MasterRepair در [worker/README.md](worker/README.md) و [worker/deploy/README.md](worker/deploy/README.md) قرار دارد.
 
-نمونه Body:
-{"tenantId":125,"queueName":"sms","jobType":"SendSms","payload":{"smsMessageId":98765},"priority":10,"idempotencyKey":"tenant-125-event-unique-id"}
+## APIهای داخلی
+- `GET /api/health`: بررسی اتصال SQL Server
+- `GET /api/jobs` و `POST /api/jobs`: مدیریت داخلی Jobها با Header `x-taskflow-api-key`
+- `GET/POST /api/reminders`, `PATCH/DELETE /api/reminders/{id}`: مدیریت تعریف‌های Reminder
 
-## امنیت و وضعیت پیاده‌سازی
-این نسخه پایه اجرایی است، نه سامانه آماده Production. API خواندن Jobها فعلاً احراز هویت ندارد و باید قبل از انتشار عمومی با Authentication و مجوز نقش‌محور محافظت شود. کلید API فقط در سرویس‌های مورد اعتماد نگهداری شود. TenantId در نسخه نهایی از توکن معتبر سمت سرور استخراج شود.
+APIهای داخلی Job و Reminder فقط برای Backendهای مورد اعتماد هستند. کلید `TASKFLOW_API_KEY` را هرگز در Frontend یا متغیرهای `NEXT_PUBLIC_*` قرار ندهید. APIهای Reminder مستقیماً دیتابیس عملیاتی Tenant انتخاب‌شده را تغییر می‌دهند.
 
-Worker Host، Outbox Dispatcher، Reminder Scheduler، احراز هویت مدیران و مدیریت کامل پیامک/صف‌ها هنوز پیاده‌سازی نشده‌اند. جزئیات در docs/architecture.md آمده است.
+## معماری Tenant-owned Reminder
+
+هر Tenant مالک تعریف یادآوری، زمان‌بندی و وضعیت اجرای یادآوری‌های خودش است. دیتابیس مرکزی فقط Jobها، صف پیامک و تاریخچه ارسال/تحویل را نگه می‌دارد؛ جدول‌های مرکزی Reminder در مسیر اجرایی جدید استفاده نمی‌شوند.
+
+جریان `RepairCompleted`:
+
+1. Repair رویداد تکمیل تعمیر را در Outbox همان دیتابیس Tenant و در تراکنش تغییر وضعیت سفارش ثبت می‌کند.
+2. Worker رویداد را با `EventId` به Job مرکزی `ProcessReminderEvent` تبدیل می‌کند.
+3. `ProcessReminderEventHandler` مستقیماً به دیتابیس Tenant متصل می‌شود و در یک تراکنش، Inbox رویداد و Scheduleهای حاصل از Rule را ثبت می‌کند.
+4. `TenantReminderSchedulerService` زمان‌های سررسیدشده را در دیتابیس Tenant پردازش می‌کند و Occurrence و Outbox اجرای آن را اتمیک می‌سازد.
+5. Dispatcher رویداد Outbox را به Job مرکزی `ExecuteReminder` تبدیل می‌کند؛ Handler با idempotency، رکورد پیامک و Job ارسال را ایجاد می‌کند.
+6. `SendSmsHandler` وضعیت یادآوری را در Tenant دوباره بررسی می‌کند و پیام را به ParsGreen می‌فرستد.
+7. رویدادهای مرکزی `dbo.SmsLogs` توسط `TenantSmsLogSyncService` با شناسه یکتای رویداد به `notification.SmsLogs` همان Tenant منتقل می‌شوند.
+
+همه مسیرهای Worker که به یک Tenant دسترسی عملیاتی دارند از قفل Exclusive مبتنی بر `sp_getapplock` استفاده می‌کنند. APIهای ایجاد، ویرایش و لغو Reminder نیز همان قفل را در سطح Transaction می‌گیرند تا تغییر Schedule با اعتبارسنجی یا ارسال Worker تداخل نداشته باشد. دو Worker نمی‌توانند یک Tenant را هم‌زمان پردازش کنند، اما Tenantهای مختلف موازی پردازش می‌شوند.
+
+برای جزئیات تنظیمات و ترتیب کامل Migrationهای مرکزی و Tenant، به [راهنمای Worker](worker/README.md) مراجعه کنید. در این نسخه Worker برای پردازش Reminder مستقیماً به دیتابیس Tenant متصل می‌شود و به `TaskFlowApi__BaseUrl` یا `TaskFlowApi__ApiKey` وابسته نیست.
+
+Reminder تکرارشونده باید سقف مشخص `maxOccurrences` داشته باشد. API و Scheduler تکرار نامحدود را نمی‌پذیرند؛ Migration Tenant شماره 010 داده‌های قدیمی بدون سقف را به 12 نوبت محدود می‌کند.
+
+Outbox انتقال at-least-once با ثبت مرکزی idempotent فراهم می‌کند؛ تحویل دقیقاً یک‌باره SMS توسط Provider خارجی تضمین نمی‌شود. Build موفق جایگزین تست SQL Server واقعی و تست End-to-End نیست.
+
+## وضعیت
+این پروژه هنوز نیازمند تست end-to-end روی SQL Server واقعی، تأیید رمزنگاری MasterRepair و تطبیق قرارداد Provider پیامک است. موفقیت Build به‌تنهایی به معنی تأیید عملکرد Production نیست.

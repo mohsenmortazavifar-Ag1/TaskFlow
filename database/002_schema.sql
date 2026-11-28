@@ -22,9 +22,10 @@ GO
 IF OBJECT_ID('dbo.TenantQueueLimits','U') IS NULL CREATE TABLE dbo.TenantQueueLimits(TenantId bigint NOT NULL,QueueName nvarchar(50) NOT NULL,IsEnabled bit NOT NULL DEFAULT(1),MaxConcurrent smallint NOT NULL DEFAULT(2),MaxPerMinute int NULL,DailyLimit int NULL,Priority tinyint NOT NULL DEFAULT(10),CreatedAt datetime2(3) NOT NULL DEFAULT(SYSUTCDATETIME()),UpdatedAt datetime2(3) NULL,CONSTRAINT PK_TenantQueueLimits PRIMARY KEY(TenantId,QueueName),CONSTRAINT FK_TenantQueueLimits_Queue FOREIGN KEY(QueueName) REFERENCES dbo.JobQueues(QueueName));
 GO
 IF OBJECT_ID('dbo.SmsMessages','U') IS NULL BEGIN
- CREATE TABLE dbo.SmsMessages(SmsMessageId bigint IDENTITY PRIMARY KEY,TenantId bigint NOT NULL,JobId bigint NULL,Mobile nvarchar(20) NOT NULL,Message nvarchar(2000) NOT NULL,ProviderCode nvarchar(50) NULL,ProviderMessageId nvarchar(150) NULL,Status tinyint NOT NULL DEFAULT(0),CreatedAt datetime2(3) NOT NULL DEFAULT(SYSUTCDATETIME()),AcceptedAt datetime2(3) NULL,DeliveredAt datetime2(3) NULL,LastError nvarchar(1000) NULL,CONSTRAINT FK_SmsMessages_Job FOREIGN KEY(JobId) REFERENCES dbo.Jobs(JobId),CONSTRAINT CK_SmsMessages_Status CHECK(Status BETWEEN 0 AND 6));
+ CREATE TABLE dbo.SmsMessages(SmsMessageId bigint IDENTITY PRIMARY KEY,TenantId bigint NOT NULL,JobId bigint NULL,Mobile nvarchar(20) NOT NULL,Message nvarchar(2000) NOT NULL,ProviderCode nvarchar(50) NULL,ProviderMessageId nvarchar(150) NULL,Status tinyint NOT NULL DEFAULT(0),CreatedAt datetime2(3) NOT NULL DEFAULT(SYSUTCDATETIME()),AcceptedAt datetime2(3) NULL,DeliveredAt datetime2(3) NULL,LastError nvarchar(1000) NULL,SubmissionState tinyint NOT NULL DEFAULT(0),SubmissionStartedAt datetime2(3) NULL,DeliveryState tinyint NOT NULL DEFAULT(0),DeliveryCheckCount tinyint NOT NULL DEFAULT(0),LastDeliveryCheckAt datetime2(3) NULL,NextDeliveryCheckAt datetime2(3) NULL,ProviderDeliveryStatus int NULL,CONSTRAINT FK_SmsMessages_Job FOREIGN KEY(JobId) REFERENCES dbo.Jobs(JobId),CONSTRAINT CK_SmsMessages_Status CHECK(Status BETWEEN 0 AND 6),CONSTRAINT CK_SmsMessages_SubmissionState CHECK(SubmissionState BETWEEN 0 AND 4),CONSTRAINT CK_SmsMessages_DeliveryState CHECK(DeliveryState BETWEEN 0 AND 5));
  CREATE INDEX IX_SmsMessages_Tenant_Created ON dbo.SmsMessages(TenantId,CreatedAt DESC);
  CREATE INDEX IX_SmsMessages_Status ON dbo.SmsMessages(Status,CreatedAt);
+ CREATE INDEX IX_SmsMessages_DeliveryDue ON dbo.SmsMessages(DeliveryState,NextDeliveryCheckAt,SmsMessageId) INCLUDE(TenantId,ProviderMessageId,DeliveryCheckCount,SubmissionState) WHERE DeliveryState=1;
 END;
 GO
 IF OBJECT_ID('dbo.SmsLogs','U') IS NULL BEGIN
@@ -33,16 +34,6 @@ IF OBJECT_ID('dbo.SmsLogs','U') IS NULL BEGIN
 END;
 GO
 IF OBJECT_ID('dbo.TenantSmsSettings','U') IS NULL CREATE TABLE dbo.TenantSmsSettings(TenantId bigint PRIMARY KEY,IsEnabled bit NOT NULL DEFAULT(1),ProviderCode nvarchar(50) NOT NULL,SenderNumber nvarchar(30) NULL,MaxPerMinute int NULL,DailyLimit int NULL,UpdatedAt datetime2(3) NOT NULL DEFAULT(SYSUTCDATETIME()));
-GO
-IF OBJECT_ID('dbo.ReminderSchedules','U') IS NULL BEGIN
- CREATE TABLE dbo.ReminderSchedules(ReminderScheduleId bigint IDENTITY PRIMARY KEY,TenantId bigint NOT NULL,ReminderType nvarchar(100) NOT NULL,SourceEntity nvarchar(100) NOT NULL,SourceEntityId bigint NOT NULL,RuleJson nvarchar(max) NOT NULL,TimeZoneId nvarchar(100) NOT NULL,ScheduleVersion int NOT NULL DEFAULT(1),IsEnabled bit NOT NULL DEFAULT(1),NextRunAtUtc datetime2(3) NULL,CreatedAt datetime2(3) NOT NULL DEFAULT(SYSUTCDATETIME()),UpdatedAt datetime2(3) NULL,CONSTRAINT CK_Reminder_RuleJson CHECK(ISJSON(RuleJson)=1));
- CREATE INDEX IX_ReminderSchedules_Due ON dbo.ReminderSchedules(IsEnabled,NextRunAtUtc) INCLUDE(TenantId,ScheduleVersion);
-END;
-GO
-IF OBJECT_ID('dbo.ReminderOccurrences','U') IS NULL BEGIN
- CREATE TABLE dbo.ReminderOccurrences(ReminderOccurrenceId bigint IDENTITY PRIMARY KEY,ReminderScheduleId bigint NOT NULL,ScheduleVersion int NOT NULL,DueAtUtc datetime2(3) NOT NULL,Status tinyint NOT NULL DEFAULT(0),JobId bigint NULL,CreatedAt datetime2(3) NOT NULL DEFAULT(SYSUTCDATETIME()),ExecutedAt datetime2(3) NULL,CONSTRAINT FK_ReminderOccurrences_Schedule FOREIGN KEY(ReminderScheduleId) REFERENCES dbo.ReminderSchedules(ReminderScheduleId),CONSTRAINT FK_ReminderOccurrences_Job FOREIGN KEY(JobId) REFERENCES dbo.Jobs(JobId),CONSTRAINT UQ_ReminderOccurrence_Due UNIQUE(ReminderScheduleId,ScheduleVersion,DueAtUtc));
- CREATE INDEX IX_ReminderOccurrences_Status_Due ON dbo.ReminderOccurrences(Status,DueAtUtc);
-END;
 GO
 IF SCHEMA_ID('ops') IS NULL EXEC('CREATE SCHEMA ops');
 GO
